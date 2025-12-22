@@ -83,6 +83,14 @@
                     <video id="right-player"></video>
                     <div class="camera-label">右</div>
                 </div>
+                <div id="left-pillar-container" class="video-container is-pip hidden" data-camera="left_pillar">
+                    <video id="left-pillar-player"></video>
+                    <div class="camera-label">左柱</div>
+                </div>
+                <div id="right-pillar-container" class="video-container is-pip hidden" data-camera="right_pillar">
+                    <video id="right-pillar-player"></video>
+                    <div class="camera-label">右柱</div>
+                </div>
 
                 <div id="videoControlsOverlay" class="video-controls-overlay">
                     <div class="video-controls-container">
@@ -130,6 +138,45 @@
                                 </div>
                             </div>
                         </div>
+                        <div id="viewSwitcher" class="view-switcher">
+                            <button class="view-btn" data-view="grid">
+                                <div class="view-icon grid-icon"></div>
+                                <span data-i18n="grid6">6-Grid</span>
+                            </button>
+                            <button class="view-btn" data-view="grid4">
+                                <div class="view-icon grid4-icon"></div>
+                                <span data-i18n="grid4">4-Grid</span>
+                            </button>
+                            <button class="view-btn" data-view="legacy">
+                                <div class="view-icon legacy-icon"></div>
+                                <span data-i18n="legacy">PIP</span>
+                            </button>
+                            <div class="vs-separator"></div>
+                            <button class="view-btn active" data-view="front">
+                                <div class="view-icon front-icon"></div>
+                                <span data-i18n="front">Front</span>
+                            </button>
+                            <button class="view-btn" data-view="back">
+                                <div class="view-icon back-icon"></div>
+                                <span data-i18n="back">Rear</span>
+                            </button>
+                            <button class="view-btn" data-view="left">
+                                <div class="view-icon left-icon"></div>
+                                <span data-i18n="left">Left</span>
+                            </button>
+                            <button class="view-btn" data-view="right">
+                                <div class="view-icon right-icon"></div>
+                                <span data-i18n="right">Right</span>
+                            </button>
+                            <button class="view-btn" data-view="left_pillar">
+                                <div class="view-icon left-pillar-icon"></div>
+                                <span data-i18n="leftPillar">Left Pillar</span>
+                            </button>
+                            <button class="view-btn" data-view="right_pillar">
+                                <div class="view-icon right-pillar-icon"></div>
+                                <span data-i18n="rightPillar">Right Pillar</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -175,6 +222,8 @@
                         <label><input type="checkbox" id="exportBack"> <span data-i18n="back">后</span></label>
                         <label><input type="checkbox" id="exportLeft"> <span data-i18n="left">左</span></label>
                         <label><input type="checkbox" id="exportRight"> <span data-i18n="right">右</span></label>
+                        <label><input type="checkbox" id="exportLeftPillar"> <span data-i18n="leftPillar">左柱</span></label>
+                        <label><input type="checkbox" id="exportRightPillar"> <span data-i18n="rightPillar">右柱</span></label>
                     </div>
                 </div>
                 <div class="clip-option-group">
