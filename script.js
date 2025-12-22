@@ -222,8 +222,8 @@ class VideoListComponent {
 
         const infoDiv = document.createElement('div');
         infoDiv.className = 'video-info';
-        const startTime = this.parseTimestamp(firstSegment.timestamp);
-        const timeString = startTime.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const startTime = this.parseTimestamp(event.startTime);
+        const timeString = startTime.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
         
         let cityHtml = '';
         if (event.city && event.lat && event.lon) {
@@ -929,7 +929,6 @@ class ModernVideoControls {
         this.timePreview.style.left = `${pos * 100}%`;
         this.timePreview.querySelector('.time-preview-time').textContent = this.formatTime(time);
         this.timePreview.classList.add('show');
-        this.progressHandle.style.left = `${pos * 100}%`;
     }
 
     hideTimePreview() {
@@ -1794,7 +1793,21 @@ class TeslaCamViewer {
         }
         return Array.from(eventMap.values()).map(event => {
             event.segments = Array.from(event.segments.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-            if (event.segments.length > 0) event.startTime = event.segments[0].timestamp;
+            if (event.segments.length > 0) {
+                // Try to get precise start time from the first file of the first segment
+                const firstSegment = event.segments[0];
+                const firstFile = Object.values(firstSegment.files)[0];
+                if (firstFile) {
+                    const match = firstFile.name.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
+                    if (match) {
+                        event.startTime = match[1];
+                    } else {
+                        event.startTime = firstSegment.timestamp;
+                    }
+                } else {
+                    event.startTime = firstSegment.timestamp;
+                }
+            }
             return event;
         }).filter(e => e.segments.length > 0).sort((a, b) => b.startTime.localeCompare(a.startTime));
     }
