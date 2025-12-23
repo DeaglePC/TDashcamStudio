@@ -2030,31 +2030,72 @@ class TeslaCamViewer {
         }
     }
 
-    downloadCurrentFile() {
+    async downloadCurrentFile() {
         if (this.multiCameraPlayer.isPlaying || !this.continuousPlayer.currentEvent) {
             return;
         }
-    
+
         const currentSegmentIndex = this.continuousPlayer.currentSegmentIndex;
         const segment = this.continuousPlayer.currentEvent.segments[currentSegmentIndex];
         if (!segment) {
             return;
         }
-    
+
         const activeCamera = this.multiCameraPlayer.activeCamera;
         const file = segment.files[activeCamera];
-    
-        if (file) {
-            const a = document.createElement('a');
-            const url = URL.createObjectURL(file);
-            a.href = url;
-            a.download = file.name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+        if (!file) {
+            return;
         }
+
+        if (window.__TAURI__) {
+            try {
+                const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke || (window.__TAURI__.tauri && window.__TAURI__.tauri.invoke);
+                if (!invoke) throw new Error('Tauri invoke not found');
+
+                const defaultName = file.name || 'TeslaCam.mp4';
+                const savePath = await invoke('plugin:dialog|save', {
+                    options: {
+                        defaultPath: defaultName,
+                        filters: [{
+                            name: 'Video',
+                            extensions: ['mp4']
+                        }]
+                    }
+                });
+
+                const resolvedSavePath = typeof savePath === 'string' ? savePath : savePath?.path;
+                if (!resolvedSavePath) {
+                    return;
+                }
+
+                const arrayBuffer = await file.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                const bytes = Array.from(uint8Array);
+
+                await invoke('write_binary_file', {
+                    path: resolvedSavePath,
+                    bytes
+                });
+
+                alert('保存成功!');
+            } catch (e) {
+                console.error('Tauri download failed:', e);
+                const errorMsg = typeof e === 'string' ? e : (e.message || JSON.stringify(e));
+                alert('保存失败: ' + errorMsg);
+            }
+            return;
+        }
+
+        const a = document.createElement('a');
+        const url = URL.createObjectURL(file);
+        a.href = url;
+        a.download = file.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
+
     
     showClipModal() {
         if (!this.videoControls.clipModeActive || 
