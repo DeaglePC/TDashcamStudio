@@ -4,7 +4,7 @@ English | [简体中文](README_CN.md)
 
 A modern, browser-based viewer for your TeslaCam footage. Play all four camera angles (Front, Back, Left, Right) simultaneously with a sleek and intuitive interface.
 
-![Screenshot](./imgs/home.png)
+![Screenshot](./src/imgs/home.png)
 
 ## ✨ Features
 
@@ -66,7 +66,7 @@ Because of web browser security policies, you need to run this application from 
 If you have Node.js installed, the easiest way is to use `npx`:
 
 ```bash
-npx http-server -p 8188 .
+npx http-server -p 8188 src
 ```
 
 Then, open your browser and go to `http://localhost:8188`.
@@ -126,7 +126,7 @@ The easiest way is to use Docker Compose with the pre-built image:
 
 **4. Browse and Play**
 
-![Video Playback](imgs/play.png)
+![Video Playback](src/imgs/play.png)
 
 *   Your recordings will appear in the sidebar, sorted by date.
 *   Use the filters to find specific events.
@@ -136,13 +136,13 @@ The easiest way is to use Docker Compose with the pre-built image:
 
 **5. Clip and Export Videos**
 
-![Clip Selection](imgs/clip.png)
+![Clip Selection](src/imgs/clip.png)
 
 1.  Click the **✂️ (scissors)** icon in the video controls to enter clip mode.
 2.  **Drag the blue handles** on the progress bar to select the start and end points of your desired clip.
 3.  Click the **✓ (checkmark)** icon to confirm your selection and open the export dialog.
 
-![Export Dialog](imgs/export.png)
+![Export Dialog](src/imgs/export.png)
 
 4.  **Configure export options**:
     - **Select Cameras**: Choose which camera angles to export (Front, Back, Left, Right, or any combination)

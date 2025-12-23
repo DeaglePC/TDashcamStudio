@@ -4,7 +4,7 @@
 
 一个现代化的、基于浏览器的 TeslaCam 录像查看器。通过一个清爽直观的界面，同步播放所有四个摄像头（前、后、左、右）的画面。
 
-![Screenshot](./imgs/home.png)
+![Screenshot](./src/imgs/home.png)
 
 ## ✨ 功能特性
 
@@ -66,7 +66,7 @@
 如果您安装了 Node.js，最简单的方式是使用 `npx`：
 
 ```bash
-npx http-server -p 8188 .
+npx http-server -p 8188 src
 ```
 
 然后，打开浏览器并访问 `http://localhost:8188`。
@@ -126,7 +126,7 @@ npx http-server -p 8188 .
 
 **4. 浏览和播放**
 
-![视频播放](imgs/play.png)
+![视频播放](src/imgs/play.png)
 
 *   您的录像将按日期在侧边栏中列出。
 *   使用筛选器查找特定事件。
@@ -136,13 +136,13 @@ npx http-server -p 8188 .
 
 **5. 剪辑和导出视频**
 
-![剪辑选择](imgs/clip.png)
+![剪辑选择](src/imgs/clip.png)
 
 1.  点击视频控制栏中的 **✂️ (剪刀)** 图标进入剪辑模式。
 2.  **拖动蓝色手柄** 在进度条上选择您想要剪辑的起始和结束位置。
 3.  点击 **✓ (对号)** 图标确认选择并打开导出对话框。
 
-![导出对话框](imgs/export.png)
+![导出对话框](src/imgs/export.png)
 
 4.  **配置导出选项**:
     - **选择摄像头**: 选择要导出的摄像头角度（前、后、左、右或任意组合）
