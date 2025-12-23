@@ -2217,14 +2217,49 @@ class TeslaCamViewer {
                 const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
                 const filename = `TeslaCam_${result.camera}_${timestamp}.mp4`;
                 
-                const url = URL.createObjectURL(result.blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                if (window.__TAURI__) {
+                    try {
+                        const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke || (window.__TAURI__.tauri && window.__TAURI__.tauri.invoke);
+                        if (!invoke) throw new Error('Tauri invoke not found');
+
+                        const savePath = await invoke('plugin:dialog|save', {
+                            options: {
+                                defaultPath: filename,
+                                filters: [{
+                                    name: 'Video',
+                                    extensions: ['mp4']
+                                }]
+                            }
+                        });
+                        
+                        const resolvedSavePath = typeof savePath === 'string' ? savePath : savePath?.path;
+                        if (resolvedSavePath) {
+                            const arrayBuffer = await result.blob.arrayBuffer();
+                            const uint8Array = new Uint8Array(arrayBuffer);
+                            const bytes = Array.from(uint8Array);
+
+                            await invoke('write_binary_file', {
+                                path: resolvedSavePath,
+                                bytes
+                            });
+
+                            alert('保存成功!');
+                        }
+                    } catch (e) {
+                        console.error('Tauri save failed:', e);
+                        const errorMsg = typeof e === 'string' ? e : (e.message || JSON.stringify(e));
+                        alert('保存失败: ' + errorMsg);
+                    }
+                } else {
+                    const url = URL.createObjectURL(result.blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }
             }
             
             this.dom.clipProgressText.textContent = translations.complete;
