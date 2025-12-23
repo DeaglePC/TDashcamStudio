@@ -33,6 +33,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get version from tag
+        id: get_version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Update version in tauri.conf.json
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            sed -i 's/"version": "[^"]*"/"version": "${{ steps.get_version.outputs.VERSION }}"/' src-tauri/tauri.conf.json
+          else
+            sed -i '' 's/"version": "[^"]*"/"version": "${{ steps.get_version.outputs.VERSION }}"/' src-tauri/tauri.conf.json 2>/dev/null || sed -i 's/"version": "[^"]*"/"version": "${{ steps.get_version.outputs.VERSION }}"/' src-tauri/tauri.conf.json
+          fi
+          cat src-tauri/tauri.conf.json | grep version
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
