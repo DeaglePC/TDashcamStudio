@@ -1,1 +1,22 @@
 .codebuddy
+
+# Dependencies
+node_modules/
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Rust
+*.rs.bk
+Cargo.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
