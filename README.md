@@ -2,7 +2,7 @@
 
 English | [简体中文](README_CN.md)
 
-A modern, browser-based viewer for your TeslaCam footage. Play all four camera angles (Front, Back, Left, Right) simultaneously with a sleek and intuitive interface.
+A modern, browser-based viewer for your TeslaCam footage. Play all four camera angles (Front, Back, Left, Right) simultaneously with a sleek and intuitive interface. Now available as a **desktop application**!
 
 ![Screenshot](./src/imgs/home.png)
 
@@ -46,6 +46,25 @@ A modern, browser-based viewer for your TeslaCam footage. Play all four camera a
 *   **Client-Side Rendering**: Real-time video processing with timestamp overlay directly in browser.
 
 ## 🚀 How to Use
+
+### 🖥️ Desktop Application (Recommended)
+
+Download the desktop application for your platform from the [Releases](https://github.com/DeaglePC/TeslaCamPlayer/releases) page:
+
+| Platform | Download |
+|----------|----------|
+| Windows | `.exe` / `.msi` |
+| macOS (Apple Silicon) | `.dmg` (aarch64) |
+| macOS (Intel) | `.dmg` (x64) |
+| Linux | `.deb` / `.AppImage` |
+
+**Advantages of Desktop App:**
+- No need to start a local server
+- Native file system access
+- Better performance
+- Works offline
+
+---
 
 ### 🌐 Online Version (Quickest Way)
 
@@ -172,6 +191,7 @@ This tool is built with privacy as a top priority. **All file processing happens
 *   **HTML5, CSS3, JavaScript (ES6+)**
 *   No frameworks, just pure vanilla JS for performance.
 *   File System Access API for local file handling.
+*   **Tauri** for desktop application (Rust backend + WebView).
 
 ## 📄 License
 

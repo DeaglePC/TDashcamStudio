@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-一个现代化的、基于浏览器的 TeslaCam 录像查看器。通过一个清爽直观的界面，同步播放所有四个摄像头（前、后、左、右）的画面。
+一个现代化的、基于浏览器的 TeslaCam 录像查看器。通过一个清爽直观的界面，同步播放所有四个摄像头（前、后、左、右）的画面。现已推出**桌面应用程序**！
 
 ![Screenshot](./src/imgs/home.png)
 
@@ -46,6 +46,25 @@
 *   **客户端渲染**: 直接在浏览器中进行实时视频处理和时间戳叠加。
 
 ## 🚀 使用方法
+
+### 🖥️ 桌面应用程序（推荐）
+
+从 [Releases](https://github.com/DeaglePC/TeslaCamPlayer/releases) 页面下载适合您平台的桌面应用程序：
+
+| 平台 | 下载格式 |
+|------|----------|
+| Windows | `.exe` / `.msi` |
+| macOS (Apple Silicon) | `.dmg` (aarch64) |
+| macOS (Intel) | `.dmg` (x64) |
+| Linux | `.deb` / `.AppImage` |
+
+**桌面应用的优势：**
+- 无需启动本地服务器
+- 原生文件系统访问
+- 更好的性能
+- 离线可用
+
+---
 
 ### 🌐 在线版本（最快方式）
 
@@ -172,6 +191,7 @@ npx http-server -p 8188 src
 *   **HTML5, CSS3, JavaScript (ES6+)**
 *   无框架，为追求性能仅使用原生 JS。
 *   使用文件系统访问 API 处理本地文件。
+*   **Tauri** 用于桌面应用程序（Rust 后端 + WebView）。
 
 ## 📄 许可证
 
