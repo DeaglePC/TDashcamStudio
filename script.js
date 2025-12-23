@@ -31,6 +31,8 @@
         back: "Back",
         left: "Left",
         right: "Right",
+        leftPillar: "Left Pillar",
+        rightPillar: "Right Pillar",
         play: "Play",
         pause: "Pause",
         toggleDay: "Switch to Day Mode",
@@ -83,10 +85,15 @@
         minutes: "分钟",
         preview: "预览图",
         noSignal: "无信号",
+        grid6: "6宫格",
+        grid4: "4宫格",
+        legacy: "画中画",
         front: "前",
         back: "后",
         left: "左",
         right: "右",
+        leftPillar: "左柱",
+        rightPillar: "右柱",
         play: "播放",
         pause: "暂停",
         toggleDay: "切换到日间模式",
@@ -215,8 +222,8 @@ class VideoListComponent {
 
         const infoDiv = document.createElement('div');
         infoDiv.className = 'video-info';
-        const startTime = this.parseTimestamp(firstSegment.timestamp);
-        const timeString = startTime.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const startTime = this.parseTimestamp(event.startTime);
+        const timeString = startTime.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
         
         let cityHtml = '';
         if (event.city && event.lat && event.lon) {
@@ -263,61 +270,128 @@ class MultiCameraPlayer {
             front: document.getElementById('front-player'),
             back: document.getElementById('back-player'),
             left: document.getElementById('left-player'),
-            right: document.getElementById('right-player')
+            right: document.getElementById('right-player'),
+            left_pillar: document.getElementById('left-pillar-player'),
+            right_pillar: document.getElementById('right-pillar-player')
         };
         this.playerContainers = {
             front: document.getElementById('front-container'),
             back: document.getElementById('back-container'),
             left: document.getElementById('left-container'),
-            right: document.getElementById('right-container')
+            right: document.getElementById('right-container'),
+            left_pillar: document.getElementById('left-pillar-container'),
+            right_pillar: document.getElementById('right-pillar-container')
         };
-        this.currentUrls = { front: null, back: null, left: null, right: null };
+        this.currentUrls = { front: null, back: null, left: null, right: null, left_pillar: null, right_pillar: null };
         this.activeCamera = 'front';
+        this.layoutMode = 'grid4'; // Default to 4-Grid
         this.isPlaying = false;
         this.isSeeking = false;
         this.playbackRate = 1.0;
         this.lastSyncTime = 0;
     }
 
-    setActive(cameraType) {
-        if (!this.players[cameraType]) return;
-        this.activeCamera = cameraType;
+    setLayout(mode) {
+        this.layoutMode = mode;
+        this.updateLayout();
+    }
 
-        const layouts = {
-            front: { back: 'top-right', left: 'bottom-left', right: 'bottom-right' },
-            back: { front: 'top-left', left: 'bottom-left', right: 'bottom-right' },
-            left: { front: 'top-left', back: 'top-right', right: 'bottom-right' },
-            right: { front: 'top-left', back: 'top-right', left: 'bottom-left' }
-        };
-        const pipMapping = layouts[cameraType] || {};
+    setCamera(camera) {
+        if (this.players[camera]) {
+            this.activeCamera = camera;
+            this.updateLayout();
+        }
+    }
+
+    updateLayout() {
+        const playerArea = document.getElementById('playerArea');
+        if (!playerArea) return;
+
+        // Reset Player Area Classes
+        playerArea.classList.remove('grid-view', 'grid4-view', 'legacy-view', 'single-view');
+
+        // Reset Container Classes
         const positionClasses = ['pos-top-left', 'pos-top-right', 'pos-bottom-left', 'pos-bottom-right'];
-
         Object.keys(this.playerContainers).forEach(key => {
             const container = this.playerContainers[key];
             if (!container) return;
-
-            container.classList.remove('is-main', 'is-pip', 'hidden', ...positionClasses);
-            container.dataset.camera = key;
-
-            if (key === cameraType) {
-                container.classList.add('is-main');
-            } else if (pipMapping[key]) {
-                container.classList.add('is-pip', `pos-${pipMapping[key]}`);
-            } else {
-                container.classList.add('is-pip', 'hidden');
-            }
+            container.classList.remove('is-main', 'is-pip', 'hidden', 'is-grid', 'is-active-single', ...positionClasses);
+            container.style.display = ''; // Reset inline display
         });
+
+        // Apply Logic based on Layout Mode
+        if (this.layoutMode === 'grid') {
+            playerArea.classList.add('grid-view');
+            Object.values(this.playerContainers).forEach(c => { if(c) c.classList.add('is-grid'); });
+        } 
+        else if (this.layoutMode === 'grid4') {
+            playerArea.classList.add('grid4-view');
+            Object.keys(this.playerContainers).forEach(key => {
+                const c = this.playerContainers[key];
+                if (!c) return;
+                // Only Front, Back, Left, Right are standard grid4
+                if (['front', 'back', 'left', 'right'].includes(key)) {
+                    c.classList.add('is-grid');
+                } else {
+                    // Pillars are hidden via CSS for grid4-view, but we can ensure it
+                }
+            });
+        }
+        else if (this.layoutMode === 'single') {
+            playerArea.classList.add('single-view');
+            const activeC = this.playerContainers[this.activeCamera];
+            if (activeC) activeC.classList.add('is-active-single');
+        }
+        else if (this.layoutMode === 'legacy') {
+            playerArea.classList.add('legacy-view');
+            
+            const layouts = {
+                front: { back: 'top-right', left: 'bottom-left', right: 'bottom-right' },
+                back: { front: 'top-left', left: 'bottom-left', right: 'bottom-right' },
+                left: { front: 'top-left', back: 'top-right', right: 'bottom-right' },
+                right: { front: 'top-left', back: 'top-right', left: 'bottom-left' },
+                left_pillar: { front: 'top-left', back: 'top-right', left: 'bottom-left' },
+                right_pillar: { front: 'top-left', back: 'top-right', right: 'bottom-right' }
+            };
+            const pipMapping = layouts[this.activeCamera] || {};
+
+            Object.keys(this.playerContainers).forEach(key => {
+                const container = this.playerContainers[key];
+                if (!container) return;
+
+                if (key === this.activeCamera) {
+                    container.classList.add('is-main');
+                } else if (pipMapping[key]) {
+                    container.classList.add('is-pip', `pos-${pipMapping[key]}`);
+                } else {
+                    container.classList.add('is-pip', 'hidden');
+                }
+            });
+        }
+    }
+
+    // Deprecated but kept for compatibility if needed, aliased to setCamera + Single Mode
+    setActive(cameraType) {
+        if (['grid', 'grid4', 'legacy'].includes(cameraType)) {
+            this.setLayout(cameraType);
+        } else {
+            this.setCamera(cameraType);
+            this.setLayout('single');
+        }
     }
 
     async loadSegmentForAllCameras(segment) {
         this.cleanup();
-        const cameras = ['front', 'back', 'left', 'right'];
+        const cameras = ['front', 'back', 'left', 'right', 'left_pillar', 'right_pillar'];
+        let activeCount = 0;
+
         for (const camera of cameras) {
             const file = segment.files[camera];
             const player = this.players[camera];
             const cameraView = this.playerContainers[camera];
 
             if (file && player) {
+                activeCount++;
                 this.currentUrls[camera] = URL.createObjectURL(file);
                 player.src = this.currentUrls[camera];
                 // Re-apply the rate here as cleanup() / .src change resets the player state.
@@ -329,6 +403,10 @@ class MultiCameraPlayer {
                 if(cameraView) cameraView.classList.add('empty');
             }
         }
+
+        // Adjust Grid Layout based on active cameras
+        // Logic removed: User explicitly selects layout now.
+        
         await this.waitForAllVideosLoaded();
     }
 
@@ -457,7 +535,7 @@ class ContinuousVideoPlayer {
         const durations = new Array(segmentCount).fill(60);
         if (segmentCount > 0) {
             const lastSegment = event.segments[segmentCount - 1];
-            const repFile = lastSegment.files.front || lastSegment.files.back || lastSegment.files.left || lastSegment.files.right;
+            const repFile = lastSegment.files.front || lastSegment.files.back || lastSegment.files.left || lastSegment.files.right || lastSegment.files.left_pillar || lastSegment.files.right_pillar;
             durations[segmentCount - 1] = await getVideoDuration(repFile);
         }
         event.segmentDurations = [];
@@ -571,9 +649,19 @@ class ModernVideoControls {
         this.clipSelection = this.container.querySelector('#clipSelection');
         this.clipStartHandle = this.container.querySelector('#clipStartHandle');
         this.clipEndHandle = this.container.querySelector('#clipEndHandle');
+        this.viewSwitcher = this.container.querySelector('#viewSwitcher');
     }
 
     bindEvents() {
+        if (this.viewSwitcher) {
+            this.viewSwitcher.addEventListener('click', (e) => {
+                const btn = e.target.closest('.view-btn');
+                if (btn && btn.dataset.view) {
+                    this.viewer.switchCamera(btn.dataset.view);
+                }
+            });
+        }
+
         if (this.playPauseBtn) this.playPauseBtn.addEventListener('click', () => this.togglePlayPause());
 
         if (this.progressContainer) {
@@ -665,6 +753,29 @@ class ModernVideoControls {
         });
     }
     
+    updateViewSwitcherUI(cameraType) {
+        if (!this.viewSwitcher) return;
+        this.viewSwitcher.querySelectorAll('.view-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.view === cameraType);
+        });
+    }
+
+    updatePillarButtons(show) {
+        if (!this.viewSwitcher) return;
+        
+        // Always show Pillar Buttons (User Request)
+        const pillarBtns = this.viewSwitcher.querySelectorAll('[data-view="left_pillar"], [data-view="right_pillar"]');
+        pillarBtns.forEach(btn => {
+            btn.style.display = 'flex';
+        });
+
+        // Always show 6-Grid Button
+        const grid6Btn = this.viewSwitcher.querySelector('[data-view="grid"]');
+        if (grid6Btn) {
+            grid6Btn.style.display = 'flex';
+        }
+    }
+
     toggleClipMode() {
         this.clipModeActive = !this.clipModeActive;
         
@@ -818,7 +929,6 @@ class ModernVideoControls {
         this.timePreview.style.left = `${pos * 100}%`;
         this.timePreview.querySelector('.time-preview-time').textContent = this.formatTime(time);
         this.timePreview.classList.add('show');
-        this.progressHandle.style.left = `${pos * 100}%`;
     }
 
     hideTimePreview() {
@@ -1280,16 +1390,35 @@ class VideoClipProcessor {
         
         const videoCount = cameras.length;
         
-        // Calculate grid layout
+        // Calculate grid layout and sort order
         let gridCols, gridRows;
-        if (videoCount === 1) {
-            gridCols = 1; gridRows = 1;
-        } else if (videoCount === 2) {
-            gridCols = 2; gridRows = 1;
+        let sortOrder;
+
+        if (videoCount > 4) {
+            // 3x2 Grid for > 4 cameras
+            gridCols = 3; 
+            gridRows = 2;
+            // Visual layout: LP Front RP / Left Back Right
+            sortOrder = ['left_pillar', 'front', 'right_pillar', 'left', 'back', 'right'];
         } else {
-            gridCols = 2; gridRows = 2;
+            // Standard layout behavior for <= 4 cameras
+            sortOrder = ['front', 'back', 'left', 'right', 'left_pillar', 'right_pillar'];
+            if (videoCount === 1) {
+                gridCols = 1; gridRows = 1;
+            } else if (videoCount === 2) {
+                gridCols = 2; gridRows = 1;
+            } else {
+                gridCols = 2; gridRows = 2;
+            }
         }
-        
+
+        const sortedCameras = cameras.sort((a, b) => {
+            const idxA = sortOrder.indexOf(a);
+            const idxB = sortOrder.indexOf(b);
+            // Handle unknown cameras by putting them at the end
+            return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+        });
+
         const cellWidth = canvasWidth;
         const cellHeight = canvasHeight;
         const gridCanvasWidth = cellWidth * gridCols;
@@ -1324,12 +1453,13 @@ class VideoClipProcessor {
         this.mediaRecorder.start();
         
         // Position mapping for grid
-        const cameraPositions = {
-            'front': { x: 0, y: 0 },
-            'back': { x: 1, y: 0 },
-            'left': { x: 0, y: 1 },
-            'right': { x: 1, y: 1 }
-        };
+        const cameraPositions = {};
+        sortedCameras.forEach((cam, index) => {
+            cameraPositions[cam] = {
+                x: index % gridCols,
+                y: Math.floor(index / gridCols)
+            };
+        });
         
         // Process all segments sequentially
         for (let i = 0; i < allSegmentVideos.length; i++) {
@@ -1486,6 +1616,8 @@ class TeslaCamViewer {
             exportBack: document.getElementById('exportBack'),
             exportLeft: document.getElementById('exportLeft'),
             exportRight: document.getElementById('exportRight'),
+            exportLeftPillar: document.getElementById('exportLeftPillar'),
+            exportRightPillar: document.getElementById('exportRightPillar'),
             addTimestamp: document.getElementById('addTimestamp'),
             mergeVideos: document.getElementById('mergeVideos'),
             clipProgress: document.getElementById('clipProgress'),
@@ -1516,7 +1648,9 @@ class TeslaCamViewer {
         this.dom.overlay.addEventListener('click', () => this.toggleSidebar(false));
         this.dom.playerArea.addEventListener('click', (e) => {
             const container = e.target.closest('.video-container.is-pip');
-            if (container) this.switchCamera(container.dataset.camera);
+            if (container) {
+                 this.multiCameraPlayer.setCamera(container.dataset.camera);
+            }
         });
         this.dom.themeToggleBtn.addEventListener('click', () => this.toggleTheme());
         this.dom.langToggleBtn.addEventListener('click', () => this.toggleLanguage());
@@ -1659,7 +1793,21 @@ class TeslaCamViewer {
         }
         return Array.from(eventMap.values()).map(event => {
             event.segments = Array.from(event.segments.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-            if (event.segments.length > 0) event.startTime = event.segments[0].timestamp;
+            if (event.segments.length > 0) {
+                // Try to get precise start time from the first file of the first segment
+                const firstSegment = event.segments[0];
+                const firstFile = Object.values(firstSegment.files)[0];
+                if (firstFile) {
+                    const match = firstFile.name.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
+                    if (match) {
+                        event.startTime = match[1];
+                    } else {
+                        event.startTime = firstSegment.timestamp;
+                    }
+                } else {
+                    event.startTime = firstSegment.timestamp;
+                }
+            }
             return event;
         }).filter(e => e.segments.length > 0).sort((a, b) => b.startTime.localeCompare(a.startTime));
     }
@@ -1695,6 +1843,10 @@ class TeslaCamViewer {
 
         this.videoControls.setEventStartTime(event.startTime);
         
+        // Check for pillars and update UI
+        const hasPillars = event.segments.some(seg => seg.files.left_pillar || seg.files.right_pillar);
+        this.videoControls.updatePillarButtons(hasPillars);
+
         if (!event.totalDuration || event.totalDuration <= 0) {
             await this.continuousPlayer.calculateEventDurations(event);
         }
@@ -1703,7 +1855,10 @@ class TeslaCamViewer {
         this.videoControls.setTotalDuration(this.continuousPlayer.getTotalDuration());
         this.videoControls.addEventMarkers(event);
         
-        this.multiCameraPlayer.setActive('front');
+        // Default to Legacy (PIP) view with Front camera
+        this.multiCameraPlayer.setCamera('front');
+        this.multiCameraPlayer.setLayout('legacy');
+        this.videoControls.updateViewSwitcherUI('legacy');
 
         await this.multiCameraPlayer.playAll();
 
@@ -1712,9 +1867,16 @@ class TeslaCamViewer {
         if (window.innerWidth < 768) this.toggleSidebar(false);
     }
 
-    switchCamera(camera) {
-        if (camera === this.multiCameraPlayer.activeCamera || !this.currentEvent) return;
-        this.multiCameraPlayer.setActive(camera);
+    switchCamera(viewId) {
+        if (!this.currentEvent) return;
+        
+        if (['grid', 'grid4', 'legacy'].includes(viewId)) {
+            this.multiCameraPlayer.setLayout(viewId);
+        } else {
+            this.multiCameraPlayer.setCamera(viewId);
+            this.multiCameraPlayer.setLayout('single');
+        }
+        this.videoControls.updateViewSwitcherUI(viewId);
     }
 
     toggleTheme() {
@@ -1811,6 +1973,14 @@ class TeslaCamViewer {
         document.querySelector('#eventFilter option[value="SavedClips"]').textContent = translations.savedClips;
         document.querySelector('#eventFilter option[value="SentryClips"]').textContent = translations.sentryClips;
         document.querySelector('#selectFolderBtn').textContent = translations.selectFolder;
+
+        // Update View Switcher and other common labels
+        document.querySelectorAll('[data-i18n="front"]').forEach(el => el.textContent = translations.front);
+        document.querySelectorAll('[data-i18n="back"]').forEach(el => el.textContent = translations.back);
+        document.querySelectorAll('[data-i18n="left"]').forEach(el => el.textContent = translations.left);
+        document.querySelectorAll('[data-i18n="right"]').forEach(el => el.textContent = translations.right);
+        document.querySelectorAll('[data-i18n="leftPillar"]').forEach(el => el.textContent = translations.leftPillar);
+        document.querySelectorAll('[data-i18n="rightPillar"]').forEach(el => el.textContent = translations.rightPillar);
 
         if (this.allFiles.length === 0) {
             this.showInitialHelpMessage();
@@ -1913,6 +2083,8 @@ class TeslaCamViewer {
         document.querySelectorAll('[data-i18n="back"]').forEach(el => el.textContent = translations.back);
         document.querySelectorAll('[data-i18n="left"]').forEach(el => el.textContent = translations.left);
         document.querySelectorAll('[data-i18n="right"]').forEach(el => el.textContent = translations.right);
+        document.querySelectorAll('[data-i18n="leftPillar"]').forEach(el => el.textContent = translations.leftPillar);
+        document.querySelectorAll('[data-i18n="rightPillar"]').forEach(el => el.textContent = translations.rightPillar);
         
         // Update clip info labels
         const clipDurationLabel = this.dom.clipDuration.previousElementSibling;
@@ -1992,6 +2164,8 @@ class TeslaCamViewer {
         if (this.dom.exportBack.checked) cameras.push('back');
         if (this.dom.exportLeft.checked) cameras.push('left');
         if (this.dom.exportRight.checked) cameras.push('right');
+        if (this.dom.exportLeftPillar && this.dom.exportLeftPillar.checked) cameras.push('left_pillar');
+        if (this.dom.exportRightPillar && this.dom.exportRightPillar.checked) cameras.push('right_pillar');
         
         if (cameras.length === 0) {
             alert(translations.selectAtLeastOneCamera);
@@ -2114,6 +2288,8 @@ class TeslaCamViewer {
         if (fileName.includes('-back.mp4')) return 'back';
         if (fileName.includes('-left_repeater.mp4')) return 'left';
         if (fileName.includes('-right_repeater.mp4')) return 'right';
+        if (fileName.includes('-left_pillar.mp4')) return 'left_pillar';
+        if (fileName.includes('-right_pillar.mp4')) return 'right_pillar';
         return null;
     }
 
