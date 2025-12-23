@@ -2,14 +2,15 @@
 
 English | [简体中文](README_CN.md)
 
-A modern, browser-based viewer for your TeslaCam footage. Play all four camera angles (Front, Back, Left, Right) simultaneously with a sleek and intuitive interface. Now available as a **desktop application**!
+A modern, browser-based viewer for your TeslaCam footage. Play all six camera angles (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar) simultaneously with a sleek and intuitive interface. Now available as a **desktop application**!
 
 ![Screenshot](./src/imgs/home.png)
 
 ## ✨ Features
 
 ### 🎥 Video Playback
-*   **Quad-Camera Sync Playback**: View footage from all four cameras at once, perfectly synchronized.
+*   **Six-Camera Sync Playback**: View footage from all six cameras (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar) at once, perfectly synchronized in a 6-grid layout.
+*   **B-Pillar Camera Support**: Full support for Tesla's interior B-pillar cameras for comprehensive coverage.
 *   **Interactive PiP**: Click on any Picture-in-Picture view to make it the main video.
 *   **Playback Speed Control**: Watch footage at 0.5x, 1.0x, 1.5x, or 2.0x speed.
 *   **Real-Time Clock**: See the actual date and time of the recording as you play.
@@ -20,9 +21,9 @@ A modern, browser-based viewer for your TeslaCam footage. Play all four camera a
 *   **Multi-Segment Processing**: Automatically handles clips spanning multiple 1-minute video files.
 *   **Confirm Button**: Separate clip selection from export action with a dedicated confirm button (✓) and visual feedback.
 *   **Flexible Export Options**:
-    - Select specific cameras to export (Front, Back, Left, Right, or any combination)
+    - Select specific cameras to export (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar, or any combination)
     - Add real-time timestamp watermarks showing exact recording time
-    - Merge all four camera views into a single 2x2 grid video
+    - Merge camera views into a grid video (2x2 for 4 cameras, 2x3 for 6 cameras)
     - Enhanced text visibility with double-sized fonts in grid mode (36px labels, 48px timestamps)
 *   **Smart Processing**: All timestamps remain accurate across multi-segment clips with automatic time calculation.
 
@@ -164,9 +165,9 @@ The easiest way is to use Docker Compose with the pre-built image:
 ![Export Dialog](src/imgs/export.png)
 
 4.  **Configure export options**:
-    - **Select Cameras**: Choose which camera angles to export (Front, Back, Left, Right, or any combination)
+    - **Select Cameras**: Choose which camera angles to export (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar, or any combination)
     - **Add Timestamp Watermark**: Overlay real-time timestamp showing the exact recording time
-    - **Merge as Grid Video**: Combine all selected cameras into a single 2x2 grid view with enhanced text visibility
+    - **Merge as Grid Video**: Combine all selected cameras into a grid view (2x2 or 2x3) with enhanced text visibility
 5.  Click **"Start Export"** to process and download your clip(s).
 
 **Key Features:**
