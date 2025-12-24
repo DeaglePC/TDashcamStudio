@@ -789,20 +789,22 @@ body.dark-theme #eventFilter {
 .controls-left, .controls-center, .controls-right {
     display: flex;
     align-items: center;
-    flex: 1;
 }
 
 .controls-left {
     justify-content: flex-start;
     gap: 12px;
+    flex-shrink: 0;
 }
 
 .controls-center {
     justify-content: center;
+    flex: 1;
 }
 
 .controls-right {
     justify-content: flex-end;
+    flex-shrink: 0;
 }
 
 .video-time-display {
@@ -1385,7 +1387,8 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     justify-content: center;
     gap: 4px;
     flex: 1;
-    padding: 0;
+    min-width: 0;
+    padding: 0 8px;
     background: transparent;
     border: none;
     overflow-x: auto;
