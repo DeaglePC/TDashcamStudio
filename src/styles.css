@@ -784,6 +784,11 @@ body.dark-theme #eventFilter {
     opacity: 1;
 }
 
+.controls-section-wrapper {
+    position: relative;
+    width: 100%;
+}
+
 .controls-section {
     display: flex;
     justify-content: space-between;
@@ -795,6 +800,7 @@ body.dark-theme #eventFilter {
 .controls-left, .controls-center, .controls-right {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
 }
 
 .controls-left {
@@ -1391,23 +1397,39 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
 .view-switcher {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: safe center;
     gap: 4px;
     flex: 1;
     min-width: 0;
-    padding: 0 8px;
+    padding: 0 8px 4px 8px;
     background: transparent;
     border: none;
-    overflow-x: auto;
     white-space: nowrap;
     margin: 0 16px;
     box-shadow: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
 }
 
 .view-switcher::-webkit-scrollbar {
-    height: 0px;
-    width: 0px;
+    height: 4px;
 }
+
+.view-switcher::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+.view-switcher::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.4);
+    border-radius: 2px;
+}
+
+.view-switcher::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.6);
+}
+
 
 .vs-separator {
     width: 1px;
