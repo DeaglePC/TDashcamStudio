@@ -14,8 +14,11 @@
         sentryClips: "🤖 Sentry Clips",
         noRecordsFound: "No records found",
         selectFolder: "📁 Select Folder",
+        selectFiles: "📁 Select Files",
         helpStep1: "Insert your Tesla USB drive into your PC",
         helpStep2: "Select the 'TeslaCam' directory from the drive",
+        helpStep1IOS: "Copy TeslaCam videos to your iPad/iPhone",
+        helpStep2IOS: "Select the video files (e.g., 2024-01-15_12-30-00-front.mp4)",
         helpNote: "Note: This tool does not upload your data. All operations are performed locally. (Gaode Maps may have inaccuracies due to limited WGS-84 support.)",
         mapModalTitle: "View on Map",
         gaodeMap: "Gaode Map",
@@ -72,8 +75,11 @@
         sentryClips: "🤖 哨兵模式",
         noRecordsFound: "没有找到匹配的记录",
         selectFolder: "📁 选择文件夹",
+        selectFiles: "📁 选择文件",
         helpStep1: "插入特斯拉U盘到你的PC",
         helpStep2: "选择U盘中的TeslaCam目录",
+        helpStep1IOS: "将TeslaCam视频复制到iPad/iPhone",
+        helpStep2IOS: "选择视频文件（如 2024-01-15_12-30-00-front.mp4）",
         helpNote: "注意：本工具不会上传你的数据，一切操作都是本地行为。（由于高德对WGS-84支持不够，所以高德地图有误差）",
         mapModalTitle: "在地图上查看",
         gaodeMap: "高德地图",
@@ -119,6 +125,22 @@
         exportFailed: "导出失败: "
     }
 };
+
+// --- Device Detection ---
+function isIOSDevice() {
+    // Detect iOS/iPadOS (including Chrome on iPad which uses WebKit)
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+           (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+           (navigator.userAgent.includes('CriOS')) || // Chrome on iOS
+           (navigator.userAgent.includes('Mobile') && navigator.maxTouchPoints > 1);
+}
+
+function supportsDirectoryPicker() {
+    // Check if webkitdirectory is actually supported and works
+    const input = document.createElement('input');
+    return 'webkitdirectory' in input && !isIOSDevice();
+}
+// --- End Device Detection ---
 
 // --- Coordinate Conversion Functions ---
 const x_pi = 3.14159265358979324 * 3000.0 / 180.0;
@@ -624,6 +646,8 @@ class ModernVideoControls {
         this.isDraggingClipEnd = false;
         this.clipModeActive = false;
         
+        this.hideControlsTimer = null;
+        
         this.initializeElements();
         this.bindEvents();
     }
@@ -725,8 +749,18 @@ class ModernVideoControls {
         }
 
         if (this.container) {
-            this.container.addEventListener('mouseenter', () => this.showControls());
-            this.container.addEventListener('mouseleave', () => this.hideControls());
+            const resetTimer = () => this.resetHideTimer();
+            this.container.addEventListener('mousemove', resetTimer);
+            this.container.addEventListener('click', resetTimer);
+            this.container.addEventListener('touchstart', resetTimer);
+            this.container.addEventListener('mouseenter', resetTimer);
+            this.container.addEventListener('mouseleave', () => {
+                // If playing, hide immediately on mouse leave (standard behavior)
+                // But keep showing if paused or interacting
+                if (this.isPlaying && !this.isDragging && !this.speedControl?.classList.contains('active')) {
+                    this.hideControls();
+                }
+            });
         }
 
         if (this.speedBtn) {
@@ -1021,6 +1055,8 @@ class ModernVideoControls {
         this.multiCameraPlayer.isPlaying = playing;
         this.playPauseIcon.src = playing ? 'assets/CodeBubbyAssets/2_38/2.svg' : 'assets/CodeBubbyAssets/2_38/10.svg';
         this.playPauseIcon.alt = i18n[this.viewer.currentLanguage][playing ? 'pause' : 'play'];
+        
+        this.resetHideTimer();
 
         const revealBtn = this.viewer.dom.revealFileBtn;
         if (revealBtn) {
@@ -1058,13 +1094,39 @@ class ModernVideoControls {
 
     showControls() {
         this.overlay.classList.add('show');
+        if (this.container) {
+            this.container.classList.remove('hide-cursor');
+        }
     }
 
     hideControls() {
-        if (this.speedControl?.classList.contains('active')) {
+        // Don't hide if paused, speed menu is open, or dragging
+        if (!this.isPlaying ||
+            this.speedControl?.classList.contains('active') || 
+            this.isDragging || 
+            this.isDraggingClipStart || 
+            this.isDraggingClipEnd) {
             return;
         }
         this.overlay.classList.remove('show');
+        if (this.container) {
+            this.container.classList.add('hide-cursor');
+        }
+    }
+    
+    resetHideTimer() {
+        this.showControls();
+        
+        if (this.hideControlsTimer) {
+            clearTimeout(this.hideControlsTimer);
+            this.hideControlsTimer = null;
+        }
+
+        if (this.isPlaying) {
+            this.hideControlsTimer = setTimeout(() => {
+                this.hideControls();
+            }, 3000); // 3 seconds auto-hide
+        }
     }
 
     setSpeed(rate) {
@@ -1588,6 +1650,7 @@ class TeslaCamViewer {
         this.videoClipProcessor = new VideoClipProcessor();
         this.dom = {
             folderInput: document.getElementById('folderInput'),
+            fileInputIOS: document.getElementById('fileInputIOS'),
             selectFolderBtn: document.getElementById('selectFolderBtn'),
             dateFilter: document.getElementById('dateFilter'),
             eventFilter: document.getElementById('eventFilter'),
@@ -1638,8 +1701,35 @@ class TeslaCamViewer {
     }
 
     initializeEventListeners() {
-        this.dom.selectFolderBtn.addEventListener('click', () => this.dom.folderInput.click());
+        const useFileInput = !supportsDirectoryPicker();
+        
+        this.dom.selectFolderBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (useFileInput) {
+                this.dom.fileInputIOS.click();
+            } else {
+                this.dom.folderInput.click();
+            }
+        });
         this.dom.folderInput.addEventListener('change', (e) => this.handleFolderSelection(e.target.files));
+        this.dom.fileInputIOS.addEventListener('change', (e) => this.handleIOSFileSelection(e.target.files));
+
+        // Drag & Drop Support
+        const dropZone = document.body;
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'copy';
+            this.dom.sidebar.classList.add('drag-over');
+        });
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.dom.sidebar.classList.remove('drag-over');
+        });
+        dropZone.addEventListener('drop', (e) => this.handleDrop(e));
+
         this.dom.eventFilter.addEventListener('change', () => this.filterAndRender());
         this.dom.toggleSidebarBtn.addEventListener('click', () => this.toggleSidebar());
         if (this.dom.openSidebarBtn) {
@@ -1730,6 +1820,72 @@ class TeslaCamViewer {
         }, 50);
     }
 
+    async handleDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.dom.sidebar.classList.remove('drag-over');
+
+        const items = e.dataTransfer.items;
+        if (!items) return;
+
+        const files = [];
+        const queue = [];
+
+        // Normalize items to entries
+        for (let i = 0; i < items.length; i++) {
+            const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+            if (entry) {
+                queue.push(entry);
+            }
+        }
+
+        // Recursive scan
+        while (queue.length > 0) {
+            const entry = queue.shift();
+            if (entry.isFile) {
+                try {
+                    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+                    // Manually attach webkitRelativePath based on fullPath
+                    // entry.fullPath usually starts with /
+                    const relativePath = entry.fullPath.startsWith('/') ? entry.fullPath.slice(1) : entry.fullPath;
+                    
+                    // We need to define property because webkitRelativePath is read-only
+                    Object.defineProperty(file, 'webkitRelativePath', {
+                        value: relativePath,
+                        writable: false
+                    });
+                    files.push(file);
+                } catch (err) {
+                    console.error("Error reading file:", entry.name, err);
+                }
+            } else if (entry.isDirectory) {
+                try {
+                    const dirReader = entry.createReader();
+                    // readEntries might not return all files at once, need to loop
+                    const readEntries = async () => {
+                        return new Promise((resolve, reject) => {
+                            dirReader.readEntries(resolve, reject);
+                        });
+                    };
+                    
+                    let entries;
+                    do {
+                        entries = await readEntries();
+                        for (const childEntry of entries) {
+                            queue.push(childEntry);
+                        }
+                    } while (entries.length > 0);
+                } catch (err) {
+                     console.error("Error reading directory:", entry.name, err);
+                }
+            }
+        }
+
+        if (files.length > 0) {
+            this.handleFolderSelection(files);
+        }
+    }
+
     async handleFolderSelection(files) {
         this.allFiles = Array.from(files);
 
@@ -1742,6 +1898,44 @@ class TeslaCamViewer {
         if (!hasTeslaCamSubfolders) {
             alert(i18n[this.currentLanguage].invalidFolder);
             this.dom.folderInput.value = ''; 
+            this.allFiles = [];
+            this.showInitialHelpMessage();
+            return;
+        }
+
+        this.eventGroups = await this.processFiles(this.allFiles);
+        this.filterAndRender();
+    }
+
+    async handleIOSFileSelection(files) {
+        if (!files || files.length === 0) return;
+        
+        // Convert files to array and add fake webkitRelativePath based on filename
+        this.allFiles = Array.from(files).map(file => {
+            // TeslaCam filename format: 2024-01-15_12-30-00-front.mp4
+            // Create a fake path structure for iOS
+            const timestampMatch = file.name.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2})-\d{2}/);
+            if (timestampMatch) {
+                // Create fake relative path: RecentClips/2024-01-15_12-30/filename.mp4
+                const eventFolder = timestampMatch[1].replace(/_/g, '-');
+                const fakePath = `RecentClips/${eventFolder}/${file.name}`;
+                // Create a new object that mimics the file with webkitRelativePath
+                return Object.defineProperty(file, 'webkitRelativePath', {
+                    value: fakePath,
+                    writable: false
+                });
+            }
+            return file;
+        });
+
+        const validFiles = this.allFiles.filter(f => f.webkitRelativePath && f.name.endsWith('.mp4'));
+        
+        if (validFiles.length === 0) {
+            const lang = this.currentLanguage;
+            alert(lang === 'zh' 
+                ? '未找到有效的TeslaCam视频文件。请选择文件名格式为 "2024-01-15_12-30-00-front.mp4" 的视频文件。'
+                : 'No valid TeslaCam video files found. Please select video files with filename format like "2024-01-15_12-30-00-front.mp4".');
+            this.dom.fileInputIOS.value = '';
             this.allFiles = [];
             this.showInitialHelpMessage();
             return;
@@ -1907,11 +2101,16 @@ class TeslaCamViewer {
     showInitialHelpMessage() {
         const lang = this.currentLanguage;
         const translations = i18n[lang];
+        const useFileInput = !supportsDirectoryPicker();
+        
+        const step1 = useFileInput ? translations.helpStep1IOS : translations.helpStep1;
+        const step2 = useFileInput ? translations.helpStep2IOS : translations.helpStep2;
+        
         const helpHtml = `
             <div class="empty-state help-text">
                 <ol>
-                    <li>${translations.helpStep1}</li>
-                    <li>${translations.helpStep2}</li>
+                    <li>${step1}</li>
+                    <li>${step2}</li>
                 </ol>
                 <p class="note">${translations.helpNote}</p>
             </div>
@@ -1972,7 +2171,9 @@ class TeslaCamViewer {
         document.querySelector('#eventFilter option[value="RecentClips"]').textContent = translations.recentClips;
         document.querySelector('#eventFilter option[value="SavedClips"]').textContent = translations.savedClips;
         document.querySelector('#eventFilter option[value="SentryClips"]').textContent = translations.sentryClips;
-        document.querySelector('#selectFolderBtn').textContent = translations.selectFolder;
+        
+        const useFileInput = !supportsDirectoryPicker();
+        document.querySelector('#selectFolderBtn').textContent = useFileInput ? translations.selectFiles : translations.selectFolder;
 
         // Update View Switcher and other common labels
         document.querySelectorAll('[data-i18n="front"]').forEach(el => el.textContent = translations.front);

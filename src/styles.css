@@ -80,7 +80,8 @@ body {
     font-family: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     background-color: var(--bg-primary);
     color: var(--text-primary);
-    height: 100vh;
+    height: 100vh; /* Fallback for browsers that don't support dvh */
+    height: 100dvh; /* Dynamic Viewport Height for mobile browsers */
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -238,6 +239,11 @@ body {
     position: relative;
 }
 
+.sidebar.drag-over {
+    background-color: rgba(102, 126, 234, 0.1);
+    box-shadow: inset 0 0 20px rgba(102, 126, 234, 0.3);
+}
+
 .sidebar.collapsed {
     margin-left: -380px;
 }
@@ -329,7 +335,6 @@ body.dark-theme #eventFilter {
     overflow-y: auto;
     padding: 1rem;
     min-height: 0;
-    padding-bottom: 90px; /* Space for the footer */
 }
 
 .empty-state {
@@ -460,9 +465,7 @@ body.dark-theme #eventFilter {
 }
 
 .sidebar-footer {
-    position: absolute;
-    bottom: 0;
-    left: 0;
+    flex-shrink: 0;
     width: 100%;
     padding: 1rem;
     border-top: 1px solid var(--border-primary);
@@ -609,10 +612,13 @@ body.dark-theme #eventFilter {
     pointer-events: none;
 }
 
-.player-area:hover .video-controls-overlay,
 .video-controls-overlay.show {
     opacity: 1;
     pointer-events: all;
+}
+
+.player-area.hide-cursor {
+    cursor: none;
 }
 
 .video-controls-container {
@@ -934,9 +940,10 @@ body.dark-theme #eventFilter {
         position: absolute;
         top: 0;
         left: 0;
+        bottom: 0; /* Force sidebar to stretch to bottom */
         width: 85%;
         max-width: 380px;
-        height: 100%;
+        height: auto; /* Allow bottom:0 to control height */
         z-index: 1000;
         min-width: unset;
         
