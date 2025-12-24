@@ -1619,9 +1619,22 @@ class VideoClipProcessor {
         const stream = this.canvas.captureStream(30);
         const chunks = [];
         
+        // Dynamic bitrate based on grid cell count (5 Mbps per cell to match single video quality)
+        // Cap at 25 Mbps to avoid browser encoding issues
+        const gridCellCount = gridCols * gridRows;
+        const videoBitsPerSecond = Math.min(5000000 * gridCellCount, 25000000);
+        
+        // Try VP9 first, fallback to VP8 if not supported
+        let mimeType = 'video/webm;codecs=vp9';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/webm;codecs=vp8';
+        }
+        
+        console.log(`Grid export: ${gridCols}x${gridRows}, ${gridCanvasWidth}x${gridCanvasHeight}, ${videoBitsPerSecond / 1000000} Mbps, codec: ${mimeType}`);
+        
         this.mediaRecorder = new MediaRecorder(stream, {
-            mimeType: 'video/webm;codecs=vp9',
-            videoBitsPerSecond: 8000000 // 8 Mbps for grid
+            mimeType,
+            videoBitsPerSecond
         });
         
         this.mediaRecorder.ondataavailable = (e) => {
@@ -2797,6 +2810,8 @@ class TeslaCamViewer {
             
             // Download results
             this.dom.clipProgressText.textContent = translations.exporting;
+            this.dom.clipProgressBar.style.width = '95%';
+            
             this.dom.clipProgressBar.style.width = '100%';
             
             for (const result of results) {
