@@ -522,15 +522,13 @@ body.dark-theme #eventFilter {
 }
 
 .player-area.empty {
-    background-image: url('https://digitalassets.tesla.com/tesla-contents/image/upload/f_auto,q_auto/Cybertruck-Second-Hero-Desktop.jpg');
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
+    background: url('./imgs/cybertruck-bg.jpg') center/cover no-repeat;
 }
 
 .player-area.empty .video-container,
 .player-area.empty .video-controls-overlay {
-    display: none;
+    display: none !important;
+    visibility: hidden !important;
 }
 
 .video-container {
