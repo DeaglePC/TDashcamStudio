@@ -271,6 +271,25 @@ body {
     font-weight: 600;
 }
 
+.github-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: color 0.2s ease, transform 0.2s ease;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.github-link:hover {
+    color: var(--text-primary);
+    transform: scale(1.1);
+}
+
+.github-link svg {
+    display: block;
+}
+
 .filters {
     display: flex;
     flex-direction: column;
