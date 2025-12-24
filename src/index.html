@@ -7,8 +7,6 @@
     <link rel="icon" href="logo.png" type="image/png">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link rel="stylesheet" href="styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.7/dist/umd/ffmpeg.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 </head>
 <body>
     <div class="container">
@@ -44,6 +42,7 @@
             <div class="sidebar-footer">
                 <button id="selectFolderBtn">选择文件夹</button>
                 <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;">
+                <input type="file" id="fileInputIOS" multiple accept="video/mp4,video/*" style="display: none;">
             </div>
         </div>
         <div class="main-content">
@@ -106,14 +105,15 @@
                                 <div class="time-preview-time">00:00</div>
                             </div>
                         </div>
-                        <div class="controls-section">
-                            <div class="controls-left">
-                                <button id="playPauseBtn" class="control-btn">
-                                    <img id="playPauseIcon" src="assets/CodeBubbyAssets/2_38/10.svg" alt="播放">
-                                </button>
-                                <div id="videoTimeDisplay" class="video-time-display">00:00 / --:--</div>
-                            </div>
-                            <div id="viewSwitcher" class="view-switcher">
+                        <div class="controls-section-wrapper">
+                            <div class="controls-section">
+                                <div class="controls-left">
+                                    <button id="playPauseBtn" class="control-btn">
+                                        <img id="playPauseIcon" src="assets/CodeBubbyAssets/2_38/10.svg" alt="播放">
+                                    </button>
+                                    <div id="videoTimeDisplay" class="video-time-display">00:00 / --:--</div>
+                                </div>
+                                <div id="viewSwitcher" class="view-switcher">
                                 <button class="view-btn" data-view="grid">
                                     <div class="view-icon grid-icon"></div>
                                     <span data-i18n="grid6">6-Grid</span>
@@ -175,6 +175,7 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
                         </div>
                     </div>
 
@@ -246,6 +247,7 @@
             <button id="closeClipModalBtn" class="close-modal-btn">&times;</button>
         </div>
     </div>
+
 
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/zh.js"></script>

@@ -14,8 +14,11 @@
         sentryClips: "🤖 Sentry Clips",
         noRecordsFound: "No records found",
         selectFolder: "📁 Select Folder",
+        selectFiles: "📁 Select Files",
         helpStep1: "Insert your Tesla USB drive into your PC",
-        helpStep2: "Select the 'TeslaCam' directory from the drive",
+        helpStep2: "Select or drag the 'TeslaCam' directory from the drive",
+        helpStep1IOS: "Copy TeslaCam videos to your iPad/iPhone",
+        helpStep2IOS: "Select the video files (e.g., 2024-01-15_12-30-00-front.mp4)",
         helpNote: "Note: This tool does not upload your data. All operations are performed locally. (Gaode Maps may have inaccuracies due to limited WGS-84 support.)",
         mapModalTitle: "View on Map",
         gaodeMap: "Gaode Map",
@@ -72,8 +75,11 @@
         sentryClips: "🤖 哨兵模式",
         noRecordsFound: "没有找到匹配的记录",
         selectFolder: "📁 选择文件夹",
+        selectFiles: "📁 选择文件",
         helpStep1: "插入特斯拉U盘到你的PC",
-        helpStep2: "选择U盘中的TeslaCam目录",
+        helpStep2: "选择或拖拽U盘中的TeslaCam目录",
+        helpStep1IOS: "将TeslaCam视频复制到iPad/iPhone",
+        helpStep2IOS: "选择视频文件（如 2024-01-15_12-30-00-front.mp4）",
         helpNote: "注意：本工具不会上传你的数据，一切操作都是本地行为。（由于高德对WGS-84支持不够，所以高德地图有误差）",
         mapModalTitle: "在地图上查看",
         gaodeMap: "高德地图",
@@ -119,6 +125,110 @@
         exportFailed: "导出失败: "
     }
 };
+
+// --- Tauri Helper Functions ---
+function getTauri() {
+    return window.__TAURI__;
+}
+
+function getFileUrl(file) {
+    const tauri = getTauri();
+    if (tauri && file.path) {
+        // Tauri 2: use core.convertFileSrc
+        let convertFn = null;
+        if (tauri.core && tauri.core.convertFileSrc) {
+            convertFn = tauri.core.convertFileSrc;
+        } else if (tauri.tauri && tauri.tauri.convertFileSrc) {
+            convertFn = tauri.tauri.convertFileSrc;
+        } else if (tauri.convertFileSrc) {
+            convertFn = tauri.convertFileSrc;
+        }
+        
+        if (convertFn) {
+            const url = convertFn(file.path);
+            console.log('[getFileUrl] path:', file.path, '-> url:', url);
+            return url;
+        }
+        
+        // Fallback: return path directly (won't work but helps debug)
+        console.warn('[getFileUrl] No convertFileSrc found, returning raw path');
+        return file.path;
+    }
+    return URL.createObjectURL(file);
+}
+
+class TauriFile {
+    constructor(entry, rootPath) {
+        this.name = entry.name;
+        this.path = entry.path; 
+        
+        // Calculate webkitRelativePath - must use forward slashes
+        if (this.path && rootPath) {
+             // Normalize all separators to forward slashes
+             const normalizedPath = this.path.replace(/\\/g, '/');
+             const normalizedRoot = rootPath.replace(/\\/g, '/');
+             
+             // Get the root folder name (e.g., "TeslaCam")
+             const rootName = normalizedRoot.split('/').filter(Boolean).pop();
+             
+             // Get the relative part after the root path
+             const relativePart = normalizedPath.substring(normalizedRoot.length);
+             const cleanRelative = relativePart.startsWith('/') ? relativePart.slice(1) : relativePart;
+             
+             if (cleanRelative) {
+                 // Ensure forward slashes in the final path
+                 this.webkitRelativePath = (rootName + '/' + cleanRelative).replace(/\\/g, '/');
+             } else {
+                 this.webkitRelativePath = this.name;
+             }
+             
+             console.log('[TauriFile] path:', this.path, '-> webkitRelativePath:', this.webkitRelativePath);
+        } else {
+             this.webkitRelativePath = this.name;
+        }
+
+        this.lastModified = 0;
+        this.size = 0; 
+        this.type = this.guessType(this.name);
+    }
+    
+    guessType(name) {
+        if (name.endsWith('.mp4')) return 'video/mp4';
+        if (name.endsWith('.json')) return 'application/json';
+        if (name.endsWith('.png')) return 'image/png';
+        return '';
+    }
+
+    async text() {
+        const tauri = getTauri();
+        if (!tauri) throw new Error("Tauri API not found");
+        return await tauri.fs.readTextFile(this.path);
+    }
+    
+    async arrayBuffer() {
+        const tauri = getTauri();
+        if (!tauri) throw new Error("Tauri API not found");
+        const binary = await tauri.fs.readFile(this.path);
+        return binary.buffer;
+    }
+}
+// --- End Tauri Helper ---
+
+// --- Device Detection ---
+function isIOSDevice() {
+    // Detect iOS/iPadOS (including Chrome on iPad which uses WebKit)
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+           (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+           (navigator.userAgent.includes('CriOS')) || // Chrome on iOS
+           (navigator.userAgent.includes('Mobile') && navigator.maxTouchPoints > 1);
+}
+
+function supportsDirectoryPicker() {
+    // Check if webkitdirectory is actually supported and works
+    const input = document.createElement('input');
+    return 'webkitdirectory' in input && !isIOSDevice();
+}
+// --- End Device Detection ---
 
 // --- Coordinate Conversion Functions ---
 const x_pi = 3.14159265358979324 * 3000.0 / 180.0;
@@ -205,7 +315,7 @@ class VideoListComponent {
         const thumbnailDiv = document.createElement('div');
         thumbnailDiv.className = 'video-thumbnail';
         if (event.thumbFile) {
-            const thumbUrl = URL.createObjectURL(event.thumbFile);
+            const thumbUrl = getFileUrl(event.thumbFile);
             const img = document.createElement('img');
             img.src = thumbUrl;
             img.alt = '预览图';
@@ -392,7 +502,7 @@ class MultiCameraPlayer {
 
             if (file && player) {
                 activeCount++;
-                this.currentUrls[camera] = URL.createObjectURL(file);
+                this.currentUrls[camera] = getFileUrl(file);
                 player.src = this.currentUrls[camera];
                 // Re-apply the rate here as cleanup() / .src change resets the player state.
                 player.defaultPlaybackRate = this.playbackRate;
@@ -515,7 +625,7 @@ class ContinuousVideoPlayer {
         const getVideoDuration = (file) => new Promise((resolve) => {
             if (!file) { resolve(60); return; }
             const video = document.createElement('video');
-            const url = URL.createObjectURL(file);
+            const url = getFileUrl(file);
             const cleanup = () => {
                 video.onloadedmetadata = null;
                 video.onerror = null;
@@ -624,6 +734,8 @@ class ModernVideoControls {
         this.isDraggingClipEnd = false;
         this.clipModeActive = false;
         
+        this.hideControlsTimer = null;
+        
         this.initializeElements();
         this.bindEvents();
     }
@@ -725,8 +837,18 @@ class ModernVideoControls {
         }
 
         if (this.container) {
-            this.container.addEventListener('mouseenter', () => this.showControls());
-            this.container.addEventListener('mouseleave', () => this.hideControls());
+            const resetTimer = () => this.resetHideTimer();
+            this.container.addEventListener('mousemove', resetTimer);
+            this.container.addEventListener('click', resetTimer);
+            this.container.addEventListener('touchstart', resetTimer);
+            this.container.addEventListener('mouseenter', resetTimer);
+            this.container.addEventListener('mouseleave', () => {
+                // If playing, hide immediately on mouse leave (standard behavior)
+                // But keep showing if paused or interacting
+                if (this.isPlaying && !this.isDragging && !this.speedControl?.classList.contains('active')) {
+                    this.hideControls();
+                }
+            });
         }
 
         if (this.speedBtn) {
@@ -1021,6 +1143,8 @@ class ModernVideoControls {
         this.multiCameraPlayer.isPlaying = playing;
         this.playPauseIcon.src = playing ? 'assets/CodeBubbyAssets/2_38/2.svg' : 'assets/CodeBubbyAssets/2_38/10.svg';
         this.playPauseIcon.alt = i18n[this.viewer.currentLanguage][playing ? 'pause' : 'play'];
+        
+        this.resetHideTimer();
 
         const revealBtn = this.viewer.dom.revealFileBtn;
         if (revealBtn) {
@@ -1058,13 +1182,39 @@ class ModernVideoControls {
 
     showControls() {
         this.overlay.classList.add('show');
+        if (this.container) {
+            this.container.classList.remove('hide-cursor');
+        }
     }
 
     hideControls() {
-        if (this.speedControl?.classList.contains('active')) {
+        // Don't hide if paused, speed menu is open, or dragging
+        if (!this.isPlaying ||
+            this.speedControl?.classList.contains('active') || 
+            this.isDragging || 
+            this.isDraggingClipStart || 
+            this.isDraggingClipEnd) {
             return;
         }
         this.overlay.classList.remove('show');
+        if (this.container) {
+            this.container.classList.add('hide-cursor');
+        }
+    }
+    
+    resetHideTimer() {
+        this.showControls();
+        
+        if (this.hideControlsTimer) {
+            clearTimeout(this.hideControlsTimer);
+            this.hideControlsTimer = null;
+        }
+
+        if (this.isPlaying) {
+            this.hideControlsTimer = setTimeout(() => {
+                this.hideControls();
+            }, 3000); // 3 seconds auto-hide
+        }
     }
 
     setSpeed(rate) {
@@ -1224,6 +1374,9 @@ class VideoClipProcessor {
         let canvasWidth = 0;
         let canvasHeight = 0;
         
+        // Check if we're in Tauri environment
+        const isTauri = !!window.__TAURI__;
+        
         for (const clipSegment of clipSegments) {
             const videoFile = clipSegment.segment.files[camera];
             
@@ -1233,7 +1386,22 @@ class VideoClipProcessor {
             
             const video = document.createElement('video');
             video.muted = true;
-            video.src = URL.createObjectURL(videoFile);
+            video.crossOrigin = 'anonymous';
+            
+            // In Tauri, we need to read the file as blob to avoid CORS issues with canvas
+            if (isTauri && videoFile.path) {
+                try {
+                    const fs = window.__TAURI__.fs;
+                    const fileData = await fs.readFile(videoFile.path);
+                    const blob = new Blob([fileData], { type: 'video/mp4' });
+                    video.src = URL.createObjectURL(blob);
+                } catch (e) {
+                    console.error('Failed to read file via Tauri fs:', e);
+                    video.src = getFileUrl(videoFile);
+                }
+            } else {
+                video.src = getFileUrl(videoFile);
+            }
             
             await new Promise((resolve, reject) => {
                 video.onloadedmetadata = resolve;
@@ -1271,13 +1439,15 @@ class VideoClipProcessor {
         
         const recordingComplete = new Promise((resolve) => {
             this.mediaRecorder.onstop = () => {
+                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0));
                 const blob = new Blob(chunks, { type: 'video/webm' });
+                console.log('Created blob, size:', blob.size);
                 resolve(blob);
             };
         });
         
-        // Start recording
-        this.mediaRecorder.start();
+        // Start recording - request data every 100ms to ensure data is captured
+        this.mediaRecorder.start(100);
         
         // Process all segments sequentially
         for (let i = 0; i < videoElements.length; i++) {
@@ -1354,6 +1524,9 @@ class VideoClipProcessor {
         let canvasWidth = 0;
         let canvasHeight = 0;
         
+        // Check if we're in Tauri environment
+        const isTauri = !!window.__TAURI__;
+        
         for (const clipSegment of clipSegments) {
             const segmentVideos = {};
             
@@ -1363,7 +1536,22 @@ class VideoClipProcessor {
                 
                 const video = document.createElement('video');
                 video.muted = true;
-                video.src = URL.createObjectURL(videoFile);
+                video.crossOrigin = 'anonymous';
+                
+                // In Tauri, we need to read the file as blob to avoid CORS issues with canvas
+                if (isTauri && videoFile.path) {
+                    try {
+                        const fs = window.__TAURI__.fs;
+                        const fileData = await fs.readFile(videoFile.path);
+                        const blob = new Blob([fileData], { type: 'video/mp4' });
+                        video.src = URL.createObjectURL(blob);
+                    } catch (e) {
+                        console.error('Failed to read file via Tauri fs:', e);
+                        video.src = getFileUrl(videoFile);
+                    }
+                } else {
+                    video.src = getFileUrl(videoFile);
+                }
                 
                 await new Promise((resolve, reject) => {
                     video.onloadedmetadata = resolve;
@@ -1431,9 +1619,22 @@ class VideoClipProcessor {
         const stream = this.canvas.captureStream(30);
         const chunks = [];
         
+        // Dynamic bitrate based on grid cell count (5 Mbps per cell to match single video quality)
+        // Cap at 25 Mbps to avoid browser encoding issues
+        const gridCellCount = gridCols * gridRows;
+        const videoBitsPerSecond = Math.min(5000000 * gridCellCount, 25000000);
+        
+        // Try VP9 first, fallback to VP8 if not supported
+        let mimeType = 'video/webm;codecs=vp9';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/webm;codecs=vp8';
+        }
+        
+        console.log(`Grid export: ${gridCols}x${gridRows}, ${gridCanvasWidth}x${gridCanvasHeight}, ${videoBitsPerSecond / 1000000} Mbps, codec: ${mimeType}`);
+        
         this.mediaRecorder = new MediaRecorder(stream, {
-            mimeType: 'video/webm;codecs=vp9',
-            videoBitsPerSecond: 8000000 // 8 Mbps for grid
+            mimeType,
+            videoBitsPerSecond
         });
         
         this.mediaRecorder.ondataavailable = (e) => {
@@ -1444,13 +1645,15 @@ class VideoClipProcessor {
         
         const recordingComplete = new Promise((resolve) => {
             this.mediaRecorder.onstop = () => {
+                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0));
                 const blob = new Blob(chunks, { type: 'video/webm' });
+                console.log('Created blob, size:', blob.size);
                 resolve(blob);
             };
         });
         
-        // Start recording
-        this.mediaRecorder.start();
+        // Start recording - request data every 100ms to ensure data is captured
+        this.mediaRecorder.start(100);
         
         // Position mapping for grid
         const cameraPositions = {};
@@ -1579,6 +1782,7 @@ class VideoClipProcessor {
 
 class TeslaCamViewer {
     constructor() {
+        this.isTauri = !!window.__TAURI__;
         this.allFiles = [];
         this.eventGroups = [];
         this.currentEvent = null;
@@ -1588,6 +1792,7 @@ class TeslaCamViewer {
         this.videoClipProcessor = new VideoClipProcessor();
         this.dom = {
             folderInput: document.getElementById('folderInput'),
+            fileInputIOS: document.getElementById('fileInputIOS'),
             selectFolderBtn: document.getElementById('selectFolderBtn'),
             dateFilter: document.getElementById('dateFilter'),
             eventFilter: document.getElementById('eventFilter'),
@@ -1638,14 +1843,79 @@ class TeslaCamViewer {
     }
 
     initializeEventListeners() {
-        this.dom.selectFolderBtn.addEventListener('click', () => this.dom.folderInput.click());
+        const useFileInput = !supportsDirectoryPicker();
+        
+        this.dom.selectFolderBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (useFileInput) {
+                this.dom.fileInputIOS.click();
+            } else {
+                this.dom.folderInput.click();
+            }
+        });
         this.dom.folderInput.addEventListener('change', (e) => this.handleFolderSelection(e.target.files));
+        this.dom.fileInputIOS.addEventListener('change', (e) => this.handleIOSFileSelection(e.target.files));
+
+        // Drag & Drop Support
+        const dropZone = document.body;
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'copy';
+            this.dom.sidebar.classList.add('drag-over');
+        });
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.dom.sidebar.classList.remove('drag-over');
+        });
+        dropZone.addEventListener('drop', (e) => this.handleDrop(e));
+
+        // Tauri File Drop Support
+        if (this.isTauri) {
+            const tauri = getTauri();
+            if (tauri && tauri.event) {
+                console.log('Registering Tauri drag/drop listeners');
+                
+                // Tauri 2 uses different event names
+                const dropEvent = 'tauri://drag-drop';
+                const enterEvent = 'tauri://drag-enter';
+                const leaveEvent = 'tauri://drag-leave';
+                
+                tauri.event.listen(enterEvent, (event) => {
+                    console.log('Tauri drag enter:', event);
+                    this.dom.sidebar.classList.add('drag-over');
+                }).catch(err => console.error('Failed to listen to drag-enter', err));
+                
+                tauri.event.listen(leaveEvent, (event) => {
+                    console.log('Tauri drag leave:', event);
+                    this.dom.sidebar.classList.remove('drag-over');
+                }).catch(err => console.error('Failed to listen to drag-leave', err));
+                
+                tauri.event.listen(dropEvent, (event) => {
+                    console.log('Tauri drag drop event received:', event);
+                    this.dom.sidebar.classList.remove('drag-over');
+                    const paths = event.payload?.paths || event.payload;
+                    if (paths && paths.length > 0) {
+                        this.handleTauriDrop(paths);
+                    }
+                }).catch(err => console.error('Failed to listen to drag-drop', err));
+            } else {
+                console.warn('Tauri detected but event API not found. window.__TAURI__:', tauri);
+            }
+        }
+
         this.dom.eventFilter.addEventListener('change', () => this.filterAndRender());
         this.dom.toggleSidebarBtn.addEventListener('click', () => this.toggleSidebar());
         if (this.dom.openSidebarBtn) {
             this.dom.openSidebarBtn.addEventListener('click', () => this.toggleSidebar(true));
         }
         this.dom.overlay.addEventListener('click', () => this.toggleSidebar(false));
+        
+        // Mobile swipe gesture support for sidebar
+        this.initSwipeGestures();
+        
         this.dom.playerArea.addEventListener('click', (e) => {
             const container = e.target.closest('.video-container.is-pip');
             if (container) {
@@ -1730,18 +2000,221 @@ class TeslaCamViewer {
         }, 50);
     }
 
+    async handleDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.dom.sidebar.classList.remove('drag-over');
+
+        if (this.isTauri) {
+            console.log('Tauri drop detected, waiting for tauri://file-drop event');
+            return;
+        }
+
+        const items = e.dataTransfer.items;
+        if (!items) return;
+
+        const files = [];
+        const queue = [];
+
+        // Normalize items to entries
+        for (let i = 0; i < items.length; i++) {
+            const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+            if (entry) {
+                queue.push(entry);
+            }
+        }
+
+        // Recursive scan
+        while (queue.length > 0) {
+            const entry = queue.shift();
+            if (entry.isFile) {
+                try {
+                    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+                    // Manually attach webkitRelativePath based on fullPath
+                    // entry.fullPath usually starts with /
+                    const relativePath = entry.fullPath.startsWith('/') ? entry.fullPath.slice(1) : entry.fullPath;
+                    
+                    // We need to define property because webkitRelativePath is read-only
+                    Object.defineProperty(file, 'webkitRelativePath', {
+                        value: relativePath,
+                        writable: false
+                    });
+                    files.push(file);
+                } catch (err) {
+                    console.error("Error reading file:", entry.name, err);
+                }
+            } else if (entry.isDirectory) {
+                try {
+                    const dirReader = entry.createReader();
+                    // readEntries might not return all files at once, need to loop
+                    const readEntries = async () => {
+                        return new Promise((resolve, reject) => {
+                            dirReader.readEntries(resolve, reject);
+                        });
+                    };
+                    
+                    let entries;
+                    do {
+                        entries = await readEntries();
+                        for (const childEntry of entries) {
+                            queue.push(childEntry);
+                        }
+                    } while (entries.length > 0);
+                } catch (err) {
+                     console.error("Error reading directory:", entry.name, err);
+                }
+            }
+        }
+
+        if (files.length > 0) {
+            this.handleFolderSelection(files);
+        }
+    }
+
+    async handleTauriDrop(paths) {
+        console.log('[Tauri Drop] Received paths:', paths);
+        
+        // Show loading state
+        const loadingDiv = document.createElement('div');
+        loadingDiv.id = 'tauri-loading';
+        loadingDiv.style.position = 'fixed';
+        loadingDiv.style.top = '50%';
+        loadingDiv.style.left = '50%';
+        loadingDiv.style.transform = 'translate(-50%, -50%)';
+        loadingDiv.style.padding = '20px';
+        loadingDiv.style.background = 'rgba(0,0,0,0.8)';
+        loadingDiv.style.color = 'white';
+        loadingDiv.style.borderRadius = '10px';
+        loadingDiv.style.zIndex = '9999';
+        loadingDiv.innerText = 'Scanning files...';
+        document.body.appendChild(loadingDiv);
+
+        try {
+            const allFiles = [];
+            for (const path of paths) {
+                console.log('[Tauri Drop] Scanning path:', path);
+                const files = await this.scanTauriFiles(path, path);
+                console.log('[Tauri Drop] Found files:', files.length);
+                allFiles.push(...files);
+            }
+
+            console.log('[Tauri Drop] Total files found:', allFiles.length);
+            if (allFiles.length > 0) {
+                // Log first few files for debugging
+                allFiles.slice(0, 5).forEach(f => {
+                    console.log('[Tauri Drop] Sample file:', f.name, 'webkitRelativePath:', f.webkitRelativePath);
+                });
+                this.handleFolderSelection(allFiles);
+            } else {
+                alert('No files found in the dropped folder.');
+            }
+        } catch (e) {
+            console.error('Tauri drop error:', e);
+            alert('Error reading files: ' + e.message);
+        } finally {
+            if (loadingDiv) loadingDiv.remove();
+        }
+    }
+
+    async scanTauriFiles(currentPath, rootPath) {
+        const tauri = getTauri();
+        const files = [];
+        
+        try {
+            let isDir = false;
+            let isFile = false;
+            
+            try {
+                const metadata = await tauri.fs.stat(currentPath);
+                isDir = metadata.isDirectory;
+                isFile = metadata.isFile;
+            } catch (e) {
+                console.warn('Stat failed for', currentPath, e);
+                return [];
+            }
+
+            if (isFile) {
+                const name = currentPath.split(/[\\/]/).pop();
+                files.push(new TauriFile({ name, path: currentPath }, rootPath));
+            } else if (isDir) {
+                const entries = await tauri.fs.readDir(currentPath);
+                for (const entry of entries) {
+                     const separator = currentPath.includes('\\') ? '\\' : '/';
+                     const fullPath = currentPath + (currentPath.endsWith(separator) ? '' : separator) + entry.name;
+                     
+                     if (entry.isDirectory) {
+                         const subFiles = await this.scanTauriFiles(fullPath, rootPath);
+                         files.push(...subFiles);
+                     } else if (entry.isFile) {
+                         files.push(new TauriFile({ name: entry.name, path: fullPath }, rootPath));
+                     }
+                }
+            }
+        } catch (e) {
+            console.warn(`Error scanning ${currentPath}:`, e);
+        }
+        return files;
+    }
+
     async handleFolderSelection(files) {
         this.allFiles = Array.from(files);
+        
+        console.log('[handleFolderSelection] Total files:', this.allFiles.length);
+        // Log sample paths for debugging
+        this.allFiles.slice(0, 5).forEach(f => {
+            console.log('[handleFolderSelection] File:', f.name, 'webkitRelativePath:', f.webkitRelativePath);
+        });
 
         const hasTeslaCamSubfolders = this.allFiles.some(file => 
             file.webkitRelativePath.includes('RecentClips/') ||
             file.webkitRelativePath.includes('SavedClips/') ||
             file.webkitRelativePath.includes('SentryClips/')
         );
+        
+        console.log('[handleFolderSelection] hasTeslaCamSubfolders:', hasTeslaCamSubfolders);
 
         if (!hasTeslaCamSubfolders) {
             alert(i18n[this.currentLanguage].invalidFolder);
             this.dom.folderInput.value = ''; 
+            this.allFiles = [];
+            this.showInitialHelpMessage();
+            return;
+        }
+
+        this.eventGroups = await this.processFiles(this.allFiles);
+        console.log('[handleFolderSelection] eventGroups:', this.eventGroups.length);
+        this.filterAndRender();
+    }
+
+    async handleIOSFileSelection(files) {
+        if (!files || files.length === 0) return;
+        
+        // Convert files to array and add fake webkitRelativePath based on filename
+        this.allFiles = Array.from(files).map(file => {
+            // TeslaCam filename format: 2024-01-15_12-30-00-front.mp4
+            // Create a fake path structure for iOS
+            const timestampMatch = file.name.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2})-\d{2}/);
+            if (timestampMatch) {
+                // Create fake relative path: RecentClips/2024-01-15_12-30/filename.mp4
+                const eventFolder = timestampMatch[1].replace(/_/g, '-');
+                const fakePath = `RecentClips/${eventFolder}/${file.name}`;
+                // Create a new object that mimics the file with webkitRelativePath
+                return Object.defineProperty(file, 'webkitRelativePath', {
+                    value: fakePath,
+                    writable: false
+                });
+            }
+            return file;
+        });
+
+        const validFiles = this.allFiles.filter(f => f.webkitRelativePath && f.name.endsWith('.mp4'));
+        
+        if (validFiles.length === 0) {
+            const lang = this.currentLanguage;
+            alert(lang === 'zh' 
+                ? '未找到有效的TeslaCam视频文件。请选择文件名格式为 "2024-01-15_12-30-00-front.mp4" 的视频文件。'
+                : 'No valid TeslaCam video files found. Please select video files with filename format like "2024-01-15_12-30-00-front.mp4".');
+            this.dom.fileInputIOS.value = '';
             this.allFiles = [];
             this.showInitialHelpMessage();
             return;
@@ -1907,11 +2380,16 @@ class TeslaCamViewer {
     showInitialHelpMessage() {
         const lang = this.currentLanguage;
         const translations = i18n[lang];
+        const useFileInput = !supportsDirectoryPicker();
+        
+        const step1 = useFileInput ? translations.helpStep1IOS : translations.helpStep1;
+        const step2 = useFileInput ? translations.helpStep2IOS : translations.helpStep2;
+        
         const helpHtml = `
             <div class="empty-state help-text">
                 <ol>
-                    <li>${translations.helpStep1}</li>
-                    <li>${translations.helpStep2}</li>
+                    <li>${step1}</li>
+                    <li>${step2}</li>
                 </ol>
                 <p class="note">${translations.helpNote}</p>
             </div>
@@ -1972,7 +2450,9 @@ class TeslaCamViewer {
         document.querySelector('#eventFilter option[value="RecentClips"]').textContent = translations.recentClips;
         document.querySelector('#eventFilter option[value="SavedClips"]').textContent = translations.savedClips;
         document.querySelector('#eventFilter option[value="SentryClips"]').textContent = translations.sentryClips;
-        document.querySelector('#selectFolderBtn').textContent = translations.selectFolder;
+        
+        const useFileInput = !supportsDirectoryPicker();
+        document.querySelector('#selectFolderBtn').textContent = useFileInput ? translations.selectFiles : translations.selectFolder;
 
         // Update View Switcher and other common labels
         document.querySelectorAll('[data-i18n="front"]').forEach(el => el.textContent = translations.front);
@@ -2004,6 +2484,77 @@ class TeslaCamViewer {
         document.body.classList.toggle('sidebar-collapsed', isNowCollapsed);
         this.dom.toggleSidebarBtn.classList.toggle('collapsed', isNowCollapsed);
         this.dom.overlay.classList.toggle('active', !isNowCollapsed && window.innerWidth < 768);
+    }
+
+    initSwipeGestures() {
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchEndX = 0;
+        let touchEndY = 0;
+        const minSwipeDistance = 50;
+        const maxVerticalDistance = 100;
+        const edgeThreshold = 30; // Edge area for swipe-to-open
+
+        // Swipe on sidebar to close
+        this.dom.sidebar.addEventListener('touchstart', (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+            touchStartY = e.changedTouches[0].screenY;
+        }, { passive: true });
+
+        this.dom.sidebar.addEventListener('touchend', (e) => {
+            if (window.innerWidth >= 768) return; // Only on mobile
+            
+            touchEndX = e.changedTouches[0].screenX;
+            touchEndY = e.changedTouches[0].screenY;
+            
+            const deltaX = touchEndX - touchStartX;
+            const deltaY = Math.abs(touchEndY - touchStartY);
+            
+            // Swipe left to close sidebar
+            if (deltaX < -minSwipeDistance && deltaY < maxVerticalDistance) {
+                this.toggleSidebar(false);
+            }
+        }, { passive: true });
+
+        // Swipe from left edge to open sidebar
+        document.addEventListener('touchstart', (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+            touchStartY = e.changedTouches[0].screenY;
+        }, { passive: true });
+
+        document.addEventListener('touchend', (e) => {
+            if (window.innerWidth >= 768) return; // Only on mobile
+            
+            const isCollapsed = this.dom.sidebar.classList.contains('collapsed');
+            if (!isCollapsed) return; // Only handle swipe-to-open when sidebar is hidden
+            
+            touchEndX = e.changedTouches[0].screenX;
+            touchEndY = e.changedTouches[0].screenY;
+            
+            const deltaX = touchEndX - touchStartX;
+            const deltaY = Math.abs(touchEndY - touchStartY);
+            
+            // Swipe right from left edge to open sidebar
+            if (touchStartX < edgeThreshold && deltaX > minSwipeDistance && deltaY < maxVerticalDistance) {
+                this.toggleSidebar(true);
+            }
+        }, { passive: true });
+        
+        // Initialize view switcher scroll with mouse wheel support
+        this.initViewSwitcherScroll();
+    }
+
+    initViewSwitcherScroll() {
+        const viewSwitcher = document.getElementById('viewSwitcher');
+        if (!viewSwitcher) return;
+
+        // Mouse wheel horizontal scroll
+        viewSwitcher.addEventListener('wheel', (e) => {
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                e.preventDefault();
+                viewSwitcher.scrollLeft += e.deltaY;
+            }
+        }, { passive: false });
     }
 
     revealCurrentFilePath() {
@@ -2070,12 +2621,19 @@ class TeslaCamViewer {
 
                 const arrayBuffer = await file.arrayBuffer();
                 const uint8Array = new Uint8Array(arrayBuffer);
-                const bytes = Array.from(uint8Array);
 
-                await invoke('write_binary_file', {
-                    path: resolvedSavePath,
-                    bytes
-                });
+                // Use Tauri fs plugin to write binary file
+                const fs = window.__TAURI__.fs;
+                if (fs && fs.writeFile) {
+                    await fs.writeFile(resolvedSavePath, uint8Array);
+                } else {
+                    // Fallback to custom command
+                    const bytes = Array.from(uint8Array);
+                    await invoke('write_binary_file', {
+                        path: resolvedSavePath,
+                        bytes
+                    });
+                }
 
                 alert('保存成功!');
             } catch (e) {
@@ -2087,7 +2645,7 @@ class TeslaCamViewer {
         }
 
         const a = document.createElement('a');
-        const url = URL.createObjectURL(file);
+        const url = getFileUrl(file);
         a.href = url;
         a.download = file.name;
         document.body.appendChild(a);
@@ -2252,11 +2810,13 @@ class TeslaCamViewer {
             
             // Download results
             this.dom.clipProgressText.textContent = translations.exporting;
+            this.dom.clipProgressBar.style.width = '95%';
+            
             this.dom.clipProgressBar.style.width = '100%';
             
             for (const result of results) {
                 const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                const filename = `TeslaCam_${result.camera}_${timestamp}.mp4`;
+                const filename = `TeslaCam_${result.camera}_${timestamp}.webm`;
                 
                 if (window.__TAURI__) {
                     try {
@@ -2268,7 +2828,7 @@ class TeslaCamViewer {
                                 defaultPath: filename,
                                 filters: [{
                                     name: 'Video',
-                                    extensions: ['mp4']
+                                    extensions: ['webm']
                                 }]
                             }
                         });
@@ -2277,12 +2837,28 @@ class TeslaCamViewer {
                         if (resolvedSavePath) {
                             const arrayBuffer = await result.blob.arrayBuffer();
                             const uint8Array = new Uint8Array(arrayBuffer);
-                            const bytes = Array.from(uint8Array);
+                            
+                            console.log('Saving video, blob size:', result.blob.size, 'uint8Array length:', uint8Array.length);
 
-                            await invoke('write_binary_file', {
-                                path: resolvedSavePath,
-                                bytes
-                            });
+                            // Use Tauri fs plugin to write binary file
+                            const fs = window.__TAURI__.fs;
+                            if (fs && fs.writeFile) {
+                                // Tauri 2 writeFile API - pass path and data directly
+                                await fs.writeFile(resolvedSavePath, uint8Array);
+                                console.log('File saved successfully via fs.writeFile');
+                            } else if (fs && fs.writeBinaryFile) {
+                                // Tauri 1.x API fallback
+                                await fs.writeBinaryFile(resolvedSavePath, uint8Array);
+                                console.log('File saved successfully via fs.writeBinaryFile');
+                            } else {
+                                // Fallback to custom command
+                                console.log('Using custom write_binary_file command');
+                                const bytes = Array.from(uint8Array);
+                                await invoke('write_binary_file', {
+                                    path: resolvedSavePath,
+                                    bytes
+                                });
+                            }
 
                             alert('保存成功!');
                         }
@@ -2334,7 +2910,7 @@ class TeslaCamViewer {
         }, 300);
     }
 
-    openMap(type) {
+    async openMap(type) {
         if (!this.currentMapCoordinates) return;
         const { lat, lon } = this.currentMapCoordinates;
         let url;
@@ -2348,7 +2924,37 @@ class TeslaCamViewer {
         } else { // google
             url = `https://www.google.com/maps?q=${lat},${lon}`;
         }
-        window.open(url, '_blank');
+        
+        // In Tauri desktop, use shell plugin to open in default browser
+        if (this.isTauri && window.__TAURI__) {
+            try {
+                const tauri = window.__TAURI__;
+                // Tauri 2: try different API paths for shell.open
+                let openFn = null;
+                if (tauri.shell?.open) {
+                    openFn = tauri.shell.open;
+                } else if (tauri.opener?.open) {
+                    openFn = tauri.opener.open;
+                }
+                
+                if (openFn) {
+                    await openFn(url);
+                } else {
+                    // Fallback: use invoke to call shell plugin directly
+                    const invoke = tauri.core?.invoke || tauri.invoke || (tauri.tauri && tauri.tauri.invoke);
+                    if (invoke) {
+                        await invoke('plugin:shell|open', { path: url });
+                    } else {
+                        window.open(url, '_blank');
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to open URL with Tauri shell:', e);
+                window.open(url, '_blank');
+            }
+        } else {
+            window.open(url, '_blank');
+        }
         this.hideMapModal();
     }
 
