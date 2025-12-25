@@ -1,6 +1,17 @@
-# TeslaCam 播放器
+<p align="center">
+  <img src="src/logo.png" alt="TeslaCam 播放器 Logo" width="80" height="80">
+</p>
+<h1 align="center">TeslaCam 播放器</h1>
 
-[English](README.md) | 简体中文
+<p align="center"><a href="README.md">English</a> | 简体中文</p>
+
+<p align="center">
+  <a href="https://github.com/DeaglePC/TeslaCamPlayer/releases"><img src="https://img.shields.io/github/v/release/DeaglePC/TeslaCamPlayer?style=flat-square&color=blue" alt="Release"></a>
+  <a href="https://github.com/DeaglePC/TeslaCamPlayer/releases"><img src="https://img.shields.io/github/downloads/DeaglePC/TeslaCamPlayer/total?style=flat-square&color=green" alt="Downloads"></a>
+  <a href="https://github.com/DeaglePC/TeslaCamPlayer/blob/main/LICENSE"><img src="https://img.shields.io/github/license/DeaglePC/TeslaCamPlayer?style=flat-square" alt="License"></a>
+  <a href="https://github.com/DeaglePC/TeslaCamPlayer/stargazers"><img src="https://img.shields.io/github/stars/DeaglePC/TeslaCamPlayer?style=flat-square" alt="Stars"></a>
+  <a href="https://teslacam.dpc.cool"><img src="https://img.shields.io/badge/Website-teslacam.dpc.cool-blue?style=flat-square" alt="Website"></a>
+</p>
 
 一个现代化的、基于浏览器的 TeslaCam 录像查看器。通过一个清爽直观的界面，同步播放所有六个摄像头（前、后、左、右、左 B 柱、右 B 柱）的画面。现已推出**桌面应用程序**！
 
