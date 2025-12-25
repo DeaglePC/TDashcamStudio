@@ -4,7 +4,7 @@ English | [简体中文](README_CN.md)
 
 A modern, browser-based viewer for your TeslaCam footage. Play all six camera angles (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar) simultaneously with a sleek and intuitive interface. Now available as a **desktop application**!
 
-![Screenshot](./src/imgs/home.png)
+![Screenshot](./.github/assets/home.webp)
 
 ## ✨ Features
 
@@ -58,6 +58,13 @@ Download the desktop application for your platform from the [Releases](https://g
 | macOS (Apple Silicon) | `.dmg` (aarch64) |
 | macOS (Intel) | `.dmg` (x64) |
 | Linux | `.deb` / `.AppImage` |
+
+> **Note for macOS Users:**
+> If you encounter the "App is damaged and can't be opened" error, this is due to Apple's security quarantine. Please run the following command in Terminal to fix it:
+> ```bash
+> sudo xattr -rd com.apple.quarantine /Applications/TeslaCam\ Player.app
+> ```
+> *(Adjust the path if your app is not in the /Applications folder)*
 
 **Advantages of Desktop App:**
 - No need to start a local server
@@ -146,7 +153,7 @@ The easiest way is to use Docker Compose with the pre-built image:
 
 **4. Browse and Play**
 
-![Video Playback](src/imgs/play.png)
+![Video Playback](.github/assets/play.webp)
 
 *   Your recordings will appear in the sidebar, sorted by date.
 *   Use the filters to find specific events.
@@ -156,13 +163,13 @@ The easiest way is to use Docker Compose with the pre-built image:
 
 **5. Clip and Export Videos**
 
-![Clip Selection](src/imgs/clip.png)
+![Clip Selection](.github/assets/clip.webp)
 
 1.  Click the **✂️ (scissors)** icon in the video controls to enter clip mode.
 2.  **Drag the blue handles** on the progress bar to select the start and end points of your desired clip.
 3.  Click the **✓ (checkmark)** icon to confirm your selection and open the export dialog.
 
-![Export Dialog](src/imgs/export.png)
+![Export Dialog](.github/assets/export.webp)
 
 4.  **Configure export options**:
     - **Select Cameras**: Choose which camera angles to export (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar, or any combination)

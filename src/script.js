@@ -1141,7 +1141,7 @@ class ModernVideoControls {
     updatePlayState(playing) {
         this.isPlaying = playing;
         this.multiCameraPlayer.isPlaying = playing;
-        this.playPauseIcon.src = playing ? 'assets/CodeBubbyAssets/2_38/2.svg' : 'assets/CodeBubbyAssets/2_38/10.svg';
+        this.playPauseIcon.src = playing ? 'assets/icons/pause.svg' : 'assets/icons/play.svg';
         this.playPauseIcon.alt = i18n[this.viewer.currentLanguage][playing ? 'pause' : 'play'];
         
         this.resetHideTimer();

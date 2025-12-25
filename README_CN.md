@@ -4,7 +4,7 @@
 
 一个现代化的、基于浏览器的 TeslaCam 录像查看器。通过一个清爽直观的界面，同步播放所有六个摄像头（前、后、左、右、左 B 柱、右 B 柱）的画面。现已推出**桌面应用程序**！
 
-![Screenshot](./src/imgs/home.png)
+![Screenshot](./.github/assets/home.webp)
 
 ## ✨ 功能特性
 
@@ -58,6 +58,13 @@
 | macOS (Apple Silicon) | `.dmg` (aarch64) |
 | macOS (Intel) | `.dmg` (x64) |
 | Linux | `.deb` / `.AppImage` |
+
+> **macOS 用户请注意：**
+> 如果您遇到“应用已损坏，无法打开”的错误提示，这是由于 Apple 的安全隔离机制导致的。请在终端（Terminal）中运行以下命令来修复：
+> ```bash
+> sudo xattr -rd com.apple.quarantine /Applications/TeslaCam\ Player.app
+> ```
+> *(如果您的应用不在 /Applications 文件夹中，请相应调整路径)*
 
 **桌面应用的优势：**
 - 无需启动本地服务器
@@ -146,7 +153,7 @@ npx http-server -p 8188 src
 
 **4. 浏览和播放**
 
-![视频播放](src/imgs/play.png)
+![视频播放](.github/assets/play.webp)
 
 *   您的录像将按日期在侧边栏中列出。
 *   使用筛选器查找特定事件。
@@ -156,13 +163,13 @@ npx http-server -p 8188 src
 
 **5. 剪辑和导出视频**
 
-![剪辑选择](src/imgs/clip.png)
+![剪辑选择](.github/assets/clip.webp)
 
 1.  点击视频控制栏中的 **✂️ (剪刀)** 图标进入剪辑模式。
 2.  **拖动蓝色手柄** 在进度条上选择您想要剪辑的起始和结束位置。
 3.  点击 **✓ (对号)** 图标确认选择并打开导出对话框。
 
-![导出对话框](src/imgs/export.png)
+![导出对话框](.github/assets/export.webp)
 
 4.  **配置导出选项**:
     - **选择摄像头**: 选择要导出的摄像头角度（前、后、左、右、左 B 柱、右 B 柱或任意组合）
