@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/logo.png" alt="TeslaCam 播放器 Logo" width="80" height="80">
+  <img src="src/logo-small.png" alt="TeslaCam 播放器 Logo" width="80" height="80">
 </p>
 <h1 align="center">TeslaCam 播放器</h1>
 
