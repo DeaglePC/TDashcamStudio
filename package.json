@@ -4,9 +4,9 @@
   "description": "Tesla Dashcam Video Player - Multi-camera synchronized playback",
   "private": true,
   "scripts": {
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "tauri": "npx tauri",
+    "tauri:dev": "npx tauri dev",
+    "tauri:build": "npx tauri build",
     "serve": "npx http-server src -p 8188 -c-1"
   },
   "devDependencies": {
