@@ -25,7 +25,10 @@
             <div class="filters">
                 <div class="filter-group">
                     <label for="dateFilter">日期</label>
-                    <input type="text" id="dateFilter" placeholder="选择日期">
+                    <div class="date-input-wrapper">
+                        <input type="text" id="dateFilter" placeholder="选择日期">
+                        <button type="button" id="clearDateBtn" class="clear-date-btn" title="清除日期">&times;</button>
+                    </div>
                 </div>
                 <div class="filter-group">
                     <label for="eventFilter">事件类型</label>
