@@ -1260,12 +1260,297 @@ class ModernVideoControls {
     }
 }
 
+// WebM Duration Fixer
+// MediaRecorder 生成的 webm 文件缺少正确的 duration 元数据
+// 这个类通过解析和修改 EBML 结构来修复 duration
+class WebmDurationFixer {
+    constructor() {
+        // EBML Element IDs
+        this.EBML_ID = 0x1A45DFA3;
+        this.SEGMENT_ID = 0x18538067;
+        this.INFO_ID = 0x1549A966;
+        this.DURATION_ID = 0x4489;
+        this.TIMECODE_SCALE_ID = 0x2AD7B1;
+        this.CLUSTER_ID = 0x1F43B675;
+        this.TIMECODE_ID = 0xE7;
+    }
+
+    async fixDuration(blob, durationMs) {
+        console.log('[WebmFixer] Starting duration fix, blob size:', blob.size, 'duration:', durationMs, 'ms');
+        
+        try {
+            const buffer = await blob.arrayBuffer();
+            const view = new DataView(buffer);
+            
+            // 查找 Segment 和 Info 元素的位置
+            const segmentInfo = this.findElement(view, 0, this.SEGMENT_ID);
+            if (!segmentInfo) {
+                console.warn('[WebmFixer] Segment not found, returning original blob');
+                return blob;
+            }
+            
+            const infoInfo = this.findElement(view, segmentInfo.dataStart, this.INFO_ID);
+            if (!infoInfo) {
+                console.warn('[WebmFixer] Info not found, returning original blob');
+                return blob;
+            }
+            
+            // 查找 TimecodeScale（默认 1000000 纳秒 = 1 毫秒）
+            let timecodeScale = 1000000;
+            const timecodeScaleInfo = this.findElement(view, infoInfo.dataStart, this.TIMECODE_SCALE_ID, infoInfo.dataStart + infoInfo.dataSize);
+            if (timecodeScaleInfo) {
+                timecodeScale = this.readUint(view, timecodeScaleInfo.dataStart, timecodeScaleInfo.dataSize);
+            }
+            
+            // 如果没有提供 duration，尝试从最后一个 Cluster 的 Timecode 计算
+            if (!durationMs || durationMs <= 0) {
+                durationMs = this.calculateDurationFromClusters(view, segmentInfo.dataStart);
+            }
+            
+            if (!durationMs || durationMs <= 0) {
+                console.warn('[WebmFixer] Could not determine duration, returning original blob');
+                return blob;
+            }
+            
+            // 将毫秒转换为 WebM 时间单位
+            const durationWebm = (durationMs * 1000000) / timecodeScale;
+            
+            // 查找现有的 Duration 元素
+            const durationInfo = this.findElement(view, infoInfo.dataStart, this.DURATION_ID, infoInfo.dataStart + infoInfo.dataSize);
+            
+            if (durationInfo) {
+                // Duration 已存在，直接修改
+                console.log('[WebmFixer] Duration element found, modifying in place');
+                const newBuffer = buffer.slice(0);
+                const newView = new DataView(newBuffer);
+                this.writeFloat64(newView, durationInfo.dataStart, durationWebm);
+                const fixedBlob = new Blob([newBuffer], { type: 'video/webm' });
+                console.log('[WebmFixer] Duration fixed successfully');
+                return fixedBlob;
+            } else {
+                // Duration 不存在，需要插入
+                console.log('[WebmFixer] Duration element not found, inserting new element');
+                return this.insertDurationElement(buffer, infoInfo, durationWebm);
+            }
+        } catch (error) {
+            console.error('[WebmFixer] Error fixing duration:', error);
+            return blob;
+        }
+    }
+    
+    // 从 Cluster 的 Timecode 计算总时长
+    calculateDurationFromClusters(view, segmentStart) {
+        let maxTimecode = 0;
+        let offset = segmentStart;
+        const endOffset = view.byteLength;
+        
+        while (offset < endOffset - 4) {
+            const clusterInfo = this.findElement(view, offset, this.CLUSTER_ID, endOffset);
+            if (!clusterInfo) break;
+            
+            // 查找 Cluster 中的 Timecode
+            const timecodeInfo = this.findElement(view, clusterInfo.dataStart, this.TIMECODE_ID, clusterInfo.dataStart + Math.min(clusterInfo.dataSize, 100));
+            if (timecodeInfo) {
+                const timecode = this.readUint(view, timecodeInfo.dataStart, timecodeInfo.dataSize);
+                if (timecode > maxTimecode) {
+                    maxTimecode = timecode;
+                }
+            }
+            
+            offset = clusterInfo.dataStart + clusterInfo.dataSize;
+        }
+        
+        // 添加一些额外时间（最后一个 cluster 的大概时长）
+        return maxTimecode > 0 ? maxTimecode + 1000 : 0;
+    }
+    
+    // 插入 Duration 元素到 Info 中
+    insertDurationElement(buffer, infoInfo, durationWebm) {
+        // Duration 元素: ID (2 bytes) + Size (1 byte) + Float64 (8 bytes) = 11 bytes
+        const durationElementSize = 11;
+        const durationElement = new Uint8Array(durationElementSize);
+        const durationView = new DataView(durationElement.buffer);
+        
+        // 写入 Duration ID (0x4489)
+        durationElement[0] = 0x44;
+        durationElement[1] = 0x89;
+        // 写入 Size (8 bytes for float64)
+        durationElement[2] = 0x88; // VINT for 8
+        // 写入 Float64 值
+        durationView.setFloat64(3, durationWebm, false);
+        
+        // 创建新的 buffer
+        const insertPosition = infoInfo.dataStart;
+        const newBuffer = new Uint8Array(buffer.byteLength + durationElementSize);
+        
+        // 复制插入点之前的数据
+        newBuffer.set(new Uint8Array(buffer, 0, insertPosition), 0);
+        // 插入 Duration 元素
+        newBuffer.set(durationElement, insertPosition);
+        // 复制插入点之后的数据
+        newBuffer.set(new Uint8Array(buffer, insertPosition), insertPosition + durationElementSize);
+        
+        // 更新 Info 元素的大小
+        this.updateElementSize(newBuffer, infoInfo.sizeStart, infoInfo.sizeLength, infoInfo.dataSize + durationElementSize);
+        
+        const fixedBlob = new Blob([newBuffer], { type: 'video/webm' });
+        console.log('[WebmFixer] Duration element inserted, new size:', fixedBlob.size);
+        return fixedBlob;
+    }
+    
+    // 更新元素大小（VINT 编码）
+    updateElementSize(buffer, sizeStart, sizeLength, newSize) {
+        // 简单实现：只支持固定长度的 size 更新
+        const view = new DataView(buffer.buffer);
+        if (sizeLength === 1) {
+            buffer[sizeStart] = 0x80 | newSize;
+        } else if (sizeLength === 2) {
+            buffer[sizeStart] = 0x40 | (newSize >> 8);
+            buffer[sizeStart + 1] = newSize & 0xFF;
+        } else if (sizeLength === 3) {
+            buffer[sizeStart] = 0x20 | (newSize >> 16);
+            buffer[sizeStart + 1] = (newSize >> 8) & 0xFF;
+            buffer[sizeStart + 2] = newSize & 0xFF;
+        } else if (sizeLength === 4) {
+            buffer[sizeStart] = 0x10 | (newSize >> 24);
+            buffer[sizeStart + 1] = (newSize >> 16) & 0xFF;
+            buffer[sizeStart + 2] = (newSize >> 8) & 0xFF;
+            buffer[sizeStart + 3] = newSize & 0xFF;
+        }
+    }
+    
+    // 查找 EBML 元素
+    findElement(view, startOffset, targetId, endOffset) {
+        endOffset = endOffset || view.byteLength;
+        let offset = startOffset;
+        
+        while (offset < endOffset - 4) {
+            const { id, idLength } = this.readVintId(view, offset);
+            if (idLength === 0) break;
+            
+            const sizeStart = offset + idLength;
+            const { value: size, length: sizeLength } = this.readVint(view, sizeStart);
+            if (sizeLength === 0) break;
+            
+            const dataStart = sizeStart + sizeLength;
+            
+            if (id === targetId) {
+                return {
+                    offset,
+                    idLength,
+                    sizeStart,
+                    sizeLength,
+                    dataStart,
+                    dataSize: size
+                };
+            }
+            
+            // 对于容器元素（Segment, Info），不跳过内容
+            if (id === this.SEGMENT_ID || id === this.INFO_ID) {
+                offset = dataStart;
+            } else {
+                offset = dataStart + size;
+            }
+        }
+        
+        return null;
+    }
+    
+    // 读取 VINT ID
+    readVintId(view, offset) {
+        if (offset >= view.byteLength) return { id: 0, idLength: 0 };
+        
+        const first = view.getUint8(offset);
+        let idLength = 1;
+        let id = first;
+        
+        if (first >= 0x80) {
+            idLength = 1;
+        } else if (first >= 0x40) {
+            idLength = 2;
+        } else if (first >= 0x20) {
+            idLength = 3;
+        } else if (first >= 0x10) {
+            idLength = 4;
+        } else {
+            return { id: 0, idLength: 0 };
+        }
+        
+        for (let i = 1; i < idLength; i++) {
+            id = (id << 8) | view.getUint8(offset + i);
+        }
+        
+        return { id, idLength };
+    }
+    
+    // 读取 VINT 大小
+    readVint(view, offset) {
+        if (offset >= view.byteLength) return { value: 0, length: 0 };
+        
+        const first = view.getUint8(offset);
+        let length = 1;
+        let value = first;
+        
+        if (first >= 0x80) {
+            length = 1;
+            value = first & 0x7F;
+        } else if (first >= 0x40) {
+            length = 2;
+            value = first & 0x3F;
+        } else if (first >= 0x20) {
+            length = 3;
+            value = first & 0x1F;
+        } else if (first >= 0x10) {
+            length = 4;
+            value = first & 0x0F;
+        } else if (first >= 0x08) {
+            length = 5;
+            value = first & 0x07;
+        } else if (first >= 0x04) {
+            length = 6;
+            value = first & 0x03;
+        } else if (first >= 0x02) {
+            length = 7;
+            value = first & 0x01;
+        } else if (first >= 0x01) {
+            length = 8;
+            value = 0;
+        } else {
+            return { value: 0, length: 0 };
+        }
+        
+        for (let i = 1; i < length; i++) {
+            value = (value << 8) | view.getUint8(offset + i);
+        }
+        
+        return { value, length };
+    }
+    
+    // 读取无符号整数
+    readUint(view, offset, length) {
+        let value = 0;
+        for (let i = 0; i < length; i++) {
+            value = (value << 8) | view.getUint8(offset + i);
+        }
+        return value;
+    }
+    
+    // 写入 Float64
+    writeFloat64(view, offset, value) {
+        view.setFloat64(offset, value, false); // big-endian
+    }
+}
+
+// 全局 WebM Duration Fixer 实例（单例）
+const webmDurationFixer = new WebmDurationFixer();
+
 // Video Clip Processor using Canvas API
 class VideoClipProcessor {
     constructor() {
         this.canvas = null;
         this.ctx = null;
         this.mediaRecorder = null;
+        this.recordingStartTime = null;
     }
     
     initCanvas(width, height) {
@@ -1425,6 +1710,7 @@ class VideoClipProcessor {
         // Setup MediaRecorder
         const stream = this.canvas.captureStream(30); // 30 fps
         const chunks = [];
+        let recordingStartTime = null;
         
         this.mediaRecorder = new MediaRecorder(stream, {
             mimeType: 'video/webm;codecs=vp9',
@@ -1439,14 +1725,16 @@ class VideoClipProcessor {
         
         const recordingComplete = new Promise((resolve) => {
             this.mediaRecorder.onstop = () => {
-                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0));
+                const recordingDuration = Date.now() - recordingStartTime;
+                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0), 'duration:', recordingDuration, 'ms');
                 const blob = new Blob(chunks, { type: 'video/webm' });
                 console.log('Created blob, size:', blob.size);
-                resolve(blob);
+                resolve({ blob, duration: recordingDuration });
             };
         });
         
         // Start recording - request data every 100ms to ensure data is captured
+        recordingStartTime = Date.now();
         this.mediaRecorder.start(100);
         
         // Process all segments sequentially
@@ -1506,14 +1794,18 @@ class VideoClipProcessor {
         // Stop recording
         this.mediaRecorder.stop();
         
-        const resultBlob = await recordingComplete;
+        const { blob: resultBlob, duration: recordingDuration } = await recordingComplete;
+        
+        // Fix WebM duration metadata
+        progressCallback?.('修复视频元数据...');
+        const fixedBlob = await webmDurationFixer.fixDuration(resultBlob, recordingDuration);
         
         // Clean up
         for (const { video } of videoElements) {
             URL.revokeObjectURL(video.src);
         }
         
-        return resultBlob;
+        return fixedBlob;
     }
     
     async createGridVideoFromSegments(clipSegments, cameras, totalStartTime, totalEndTime, addTimestamp, eventStartTime, progressCallback) {
@@ -1618,6 +1910,7 @@ class VideoClipProcessor {
         // Setup MediaRecorder
         const stream = this.canvas.captureStream(30);
         const chunks = [];
+        let recordingStartTime = null;
         
         // Dynamic bitrate based on grid cell count (5 Mbps per cell to match single video quality)
         // Cap at 25 Mbps to avoid browser encoding issues
@@ -1645,14 +1938,16 @@ class VideoClipProcessor {
         
         const recordingComplete = new Promise((resolve) => {
             this.mediaRecorder.onstop = () => {
-                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0));
+                const recordingDuration = Date.now() - recordingStartTime;
+                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0), 'duration:', recordingDuration, 'ms');
                 const blob = new Blob(chunks, { type: 'video/webm' });
                 console.log('Created blob, size:', blob.size);
-                resolve(blob);
+                resolve({ blob, duration: recordingDuration });
             };
         });
         
         // Start recording - request data every 100ms to ensure data is captured
+        recordingStartTime = Date.now();
         this.mediaRecorder.start(100);
         
         // Position mapping for grid
@@ -1751,7 +2046,11 @@ class VideoClipProcessor {
         // Stop recording
         this.mediaRecorder.stop();
         
-        const resultBlob = await recordingComplete;
+        const { blob: resultBlob, duration: recordingDuration } = await recordingComplete;
+        
+        // Fix WebM duration metadata
+        progressCallback?.('修复视频元数据...');
+        const fixedBlob = await webmDurationFixer.fixDuration(resultBlob, recordingDuration);
         
         // Clean up
         for (const { videos } of allSegmentVideos) {
@@ -1760,7 +2059,7 @@ class VideoClipProcessor {
             }
         }
         
-        return resultBlob;
+        return fixedBlob;
     }
     
     drawTimestamp(timeString) {
