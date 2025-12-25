@@ -230,12 +230,13 @@ body {
 .sidebar {
     width: 380px;
     min-width: 380px;
+    max-width: 380px;
     background: var(--bg-secondary);
     border-right: 1px solid var(--border-primary);
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    transition: margin-left 0.3s ease-in-out, background-color 0.3s, border-color 0.3s;
+    transition: margin-left 0.3s ease-in-out, width 0.3s ease, background-color 0.3s, border-color 0.3s;
     position: relative;
 }
 
@@ -246,6 +247,7 @@ body {
 
 .sidebar.collapsed {
     margin-left: -380px;
+    width: 380px;
 }
 
 .sidebar-header {
@@ -317,11 +319,28 @@ body {
     padding: 0.625rem; /* 10px */
     border: 1px solid var(--border-secondary);
     border-radius: 6px;
-    font-size: 0.875rem; /* 14px */
+    font-size: 1rem; /* 16px to prevent iOS zoom */
     background-color: var(--bg-input);
     color: var(--text-primary);
     transition: border-color 0.2s, box-shadow 0.2s, background-color 0.3s, color 0.3s;
     cursor: pointer;
+    /* Fix for mobile browsers overriding styles */
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    /* Prevent color scheme override */
+    color-scheme: dark;
+}
+
+/* Ensure dark theme input styles are applied with higher specificity */
+body.dark-theme #dateFilter,
+body.dark-theme #eventFilter,
+.dark-theme input#dateFilter,
+.dark-theme select#eventFilter {
+    background-color: var(--bg-input) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-secondary) !important;
+    -webkit-text-fill-color: var(--text-primary);
 }
 
 #dateFilter:focus, #eventFilter:focus {
@@ -342,6 +361,50 @@ body {
 
 body.dark-theme #eventFilter {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23b0b3b8' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+}
+
+/* Date input wrapper with clear button */
+.date-input-wrapper {
+    position: relative;
+    display: flex;
+    flex: 1;
+}
+
+.date-input-wrapper #dateFilter {
+    flex: 1;
+    padding-right: 36px;
+}
+
+.clear-date-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease;
+}
+
+.clear-date-btn.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.clear-date-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
 }
 
 #dateFilter::-webkit-calendar-picker-indicator {
@@ -895,6 +958,11 @@ body.dark-theme #eventFilter {
     font-size: 1rem;
     font-weight: 500;
     white-space: nowrap;
+    display: none; /* Hidden by default */
+}
+
+.real-time-clock.visible {
+    display: block;
 }
 
 .speed-control {
@@ -958,6 +1026,47 @@ body.dark-theme #eventFilter {
 }
 
 /* Responsive Design */
+
+/* Medium screens - narrower sidebar */
+@media (max-width: 1200px) {
+    .sidebar {
+        width: 320px;
+        min-width: 320px;
+        max-width: 320px;
+    }
+    
+    .sidebar.collapsed {
+        margin-left: -320px;
+        width: 320px;
+    }
+}
+
+@media (max-width: 1000px) {
+    .sidebar {
+        width: 280px;
+        min-width: 280px;
+        max-width: 280px;
+    }
+    
+    .sidebar.collapsed {
+        margin-left: -280px;
+        width: 280px;
+    }
+    
+    .sidebar-header {
+        padding: 0.75rem;
+    }
+    
+    .sidebar-header .header-title {
+        font-size: 1.1rem;
+    }
+    
+    .filter-section {
+        padding: 0.75rem;
+    }
+}
+
+/* Small screens - overlay sidebar */
 @media (max-width: 768px) {
     .sidebar {
         position: absolute;
@@ -980,6 +1089,31 @@ body.dark-theme #eventFilter {
         /* Override desktop animation and use transform */
         margin-left: 0;
         transform: translateX(-100%);
+        width: 85%;
+    }
+    
+    /* Fix mobile browser input styling - force dark theme colors */
+    #dateFilter,
+    #eventFilter,
+    input#dateFilter,
+    select#eventFilter {
+        -webkit-appearance: none !important;
+        -moz-appearance: none !important;
+        appearance: none !important;
+        background-color: var(--bg-input) !important;
+        color: var(--text-primary) !important;
+        -webkit-text-fill-color: var(--text-primary) !important;
+        border-color: var(--border-secondary) !important;
+        border-radius: 6px !important;
+        font-size: 16px !important; /* Prevent iOS zoom on focus */
+        opacity: 1 !important; /* Fix iOS disabled-like appearance */
+    }
+    
+    /* Override iOS/Safari input styling */
+    input[type="text"]#dateFilter {
+        background: var(--bg-input) !important;
+        color: var(--text-primary) !important;
+        -webkit-text-fill-color: var(--text-primary) !important;
     }
 
 }

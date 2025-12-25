@@ -1084,9 +1084,12 @@ class ModernVideoControls {
 
         const currentEvent = this.continuousPlayer.currentEvent;
         if (!currentEvent) {
-            this.realTimeClock.textContent = '--:--:--';
+            this.realTimeClock.classList.remove('visible');
             return;
         }
+        
+        // Show the clock when there's an event
+        this.realTimeClock.classList.add('visible');
 
         try {
             let newTime;
@@ -1113,7 +1116,7 @@ class ModernVideoControls {
             // Fallback or default behavior for Sentry/Saved and if RecentClips logic fails
             if (!newTime) {
                 if (!this.currentEventStartTime) {
-                    this.realTimeClock.textContent = '--:--:--';
+                    this.realTimeClock.classList.remove('visible');
                     return;
                 }
                 newTime = new Date(this.currentEventStartTime.getTime());
@@ -2094,6 +2097,7 @@ class TeslaCamViewer {
             fileInputIOS: document.getElementById('fileInputIOS'),
             selectFolderBtn: document.getElementById('selectFolderBtn'),
             dateFilter: document.getElementById('dateFilter'),
+            clearDateBtn: document.getElementById('clearDateBtn'),
             eventFilter: document.getElementById('eventFilter'),
             sidebar: document.querySelector('.sidebar'),
             toggleSidebarBtn: document.getElementById('toggleSidebarBtn'),
@@ -2266,8 +2270,10 @@ class TeslaCamViewer {
             dateFormat: "Y-m-d",
             locale: this.currentLanguage === 'zh' ? 'zh' : 'default',
             placeholder: translations.selectDate,
+            disableMobile: true, // Force flatpickr on mobile instead of native picker
             onChange: (selectedDates, dateStr, instance) => {
                 this.filterAndRender();
+                this.updateClearDateButton();
             },
             onReady: (selectedDates, dateStr, instance) => {
                 // Guard clause for onReady
@@ -2276,6 +2282,27 @@ class TeslaCamViewer {
                 }
             }
         });
+        
+        // Initialize clear date button
+        if (this.dom.clearDateBtn) {
+            this.dom.clearDateBtn.addEventListener('click', () => this.clearDateFilter());
+            this.updateClearDateButton();
+        }
+    }
+    
+    clearDateFilter() {
+        if (this.flatpickrInstance) {
+            this.flatpickrInstance.clear();
+            this.filterAndRender();
+            this.updateClearDateButton();
+        }
+    }
+    
+    updateClearDateButton() {
+        if (this.dom.clearDateBtn) {
+            const hasValue = this.dom.dateFilter && this.dom.dateFilter.value;
+            this.dom.clearDateBtn.classList.toggle('visible', !!hasValue);
+        }
     }
 
     handleGlobalKeydown(e) {
