@@ -1219,8 +1219,8 @@ body.sidebar-collapsed .open-sidebar-btn {
 .download-buttons {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-top: 15px;
+    gap: 8px;
+    margin-top: 12px;
 }
 
 /* Download Button Styles */
@@ -1228,17 +1228,17 @@ body.sidebar-collapsed .open-sidebar-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    padding: 14px 20px;
+    gap: 8px;
+    padding: 10px 16px;
     border: none;
-    border-radius: 12px;
-    font-size: 0.95rem;
-    font-weight: 600;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
     color: #fff;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+    transition: all 0.2s ease;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
     position: relative;
     overflow: hidden;
 }
@@ -1255,8 +1255,8 @@ body.sidebar-collapsed .open-sidebar-btn {
 }
 
 .download-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
 .download-btn:hover::before {
@@ -1265,11 +1265,11 @@ body.sidebar-collapsed .open-sidebar-btn {
 
 .download-btn:active {
     transform: translateY(0);
-    box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
 }
 
 .download-btn .btn-icon {
-    font-size: 1.2rem;
+    font-size: 1rem;
 }
 
 .download-btn .btn-text {
@@ -1278,19 +1278,22 @@ body.sidebar-collapsed .open-sidebar-btn {
 }
 
 .download-btn .btn-size {
-    font-size: 0.8rem;
-    opacity: 0.8;
+    font-size: 0.75rem;
+    opacity: 0.9;
     font-weight: 400;
+    background: rgba(255, 255, 255, 0.15);
+    padding: 2px 8px;
+    border-radius: 4px;
 }
 
-/* Grid video button variant */
+/* Grid video button variant - slightly different shade */
 .download-btn.grid-btn {
-    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
-    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+    box-shadow: 0 2px 8px rgba(118, 75, 162, 0.3);
 }
 
 .download-btn.grid-btn:hover {
-    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+    box-shadow: 0 4px 12px rgba(118, 75, 162, 0.4);
 }
 
 /* Clip Modal Styles */
@@ -1576,6 +1579,23 @@ body.sidebar-collapsed .open-sidebar-btn {
     width: 0;
     transition: width 0.3s ease;
     box-shadow: 0 0 8px rgba(102, 126, 234, 0.5);
+}
+
+.progress-bar-fill.indeterminate {
+    width: 30% !important;
+    animation: indeterminate 1.5s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+    0% {
+        transform: translateX(-100%);
+    }
+    50% {
+        transform: translateX(200%);
+    }
+    100% {
+        transform: translateX(-100%);
+    }
 }
 
 .progress-text {
@@ -2101,5 +2121,92 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     background: transparent;
 }
 
+/* Toast Notification */
+.toast-container {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
+}
 
+.toast {
+    background: rgba(30, 30, 40, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    opacity: 0;
+    transform: translateY(-20px);
+    transition: all 0.3s ease;
+    pointer-events: auto;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.toast.success {
+    border-left: 3px solid #28a745;
+}
+
+.toast.success::before {
+    content: '✓';
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.toast.error {
+    border-left: 3px solid #dc3545;
+}
+
+.toast.error::before {
+    content: '✕';
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: linear-gradient(135deg, #dc3545 0%, #ff6b6b 100%);
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.toast.info {
+    border-left: 3px solid #667eea;
+}
+
+.toast.info::before {
+    content: 'ℹ';
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: bold;
+}
 

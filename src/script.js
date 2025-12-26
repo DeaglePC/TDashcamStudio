@@ -903,7 +903,13 @@ class ModernVideoControls {
         this.clipModeActive = !this.clipModeActive;
         
         if (this.clipModeActive) {
-            // Enter clip mode - initialize selection
+            // Enter clip mode - pause video first
+            if (this.multiCameraPlayer.isPlaying) {
+                this.multiCameraPlayer.pauseAll();
+                this.updatePlayState(false);
+            }
+            
+            // Initialize selection
             const currentTime = this.continuousPlayer.getCurrentTime();
             const duration = this.totalDuration;
             
@@ -1764,7 +1770,7 @@ class VideoClipProcessor {
                 const stampedStream = `[v_final]`;
                 // Escape colons and special chars for filter string
                 // text='%{pts\:localtime\:1700000000}'
-                const drawText = `drawtext=fontfile=${fontFile}:text='%{pts\\:localtime\\:${startEpoch}}':x=(w-text_w)/2:y=h-80:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5`;
+                const drawText = `drawtext=fontfile=${fontFile}:text='%{pts\\:localtime\\:${startEpoch}}':x=w-text_w-20:y=20:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5`;
                 
                 filterComplex += `${finalStream}${drawText}${stampedStream}`;
                 finalStream = stampedStream;
@@ -2094,8 +2100,8 @@ class VideoClipProcessor {
                     startEpoch
                 });
                 
-                // drawtext filter for timestamp
-                const drawtext = `drawtext=text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=(w-text_w)/2:y=h-60:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.5`;
+                // drawtext filter for timestamp (top-right corner)
+                const drawtext = `drawtext=text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=w-text_w-20:y=20:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.5`;
                 
                 args = [
                     '-f', 'concat',
@@ -2240,7 +2246,7 @@ class VideoClipProcessor {
                 const clipStartTimeObj = new Date(firstSegTime.getTime() + clipSegments[0].clipStart * 1000);
                 const startEpoch = Math.floor(clipStartTimeObj.getTime() / 1000);
                 
-                const drawtext = `drawtext=text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=(w-text_w)/2:y=h-60:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.5`;
+                const drawtext = `drawtext=text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=w-text_w-20:y=20:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.5`;
                 filterComplex += `;[grid]${drawtext}[final]`;
                 finalOutput = '[final]';
             }
@@ -2425,6 +2431,7 @@ class VideoClipProcessor {
         
         // Start recording
         this.mediaRecorder.start(100);
+        const recordingStartTime = performance.now();
         
         // Process all segments using requestVideoFrameCallback for precise frame capture
         let processedFrames = 0;
@@ -2605,21 +2612,33 @@ class VideoClipProcessor {
             }
         }
         
-        // Stop recording
+        // Stop recording - add a small delay to ensure all frames are captured
+        await new Promise(resolve => setTimeout(resolve, 200));
         this.mediaRecorder.stop();
         
         const resultBlob = await recordingComplete;
         
-        // Calculate actual duration based on frames
-        const actualDuration = totalDuration * 1000; // Convert to ms
+        // Calculate actual duration based on real recording time
+        const recordingEndTime = performance.now();
+        const actualDuration = recordingEndTime - recordingStartTime;
+        console.log(`[Grid Export] Recording completed. Expected: ${totalDuration * 1000}ms, Actual: ${actualDuration}ms, Frames: ${processedFrames}`);
         
         // Fix WebM duration metadata
         progressCallback?.('修复视频元数据...');
         const fixedBlob = await webmDurationFixer.fixDuration(resultBlob, actualDuration);
         
-        // Clean up
+        // Clean up video elements and blob URLs
         for (const { video } of videoElements) {
+            video.pause();
             URL.revokeObjectURL(video.src);
+            video.src = '';
+            video.load(); // 释放视频资源
+        }
+        videoElements.length = 0; // 清空数组引用
+        
+        // 清理 canvas 和 stream
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
         }
         
         return fixedBlob;
@@ -2770,7 +2789,9 @@ class VideoClipProcessor {
         });
         
         // Start recording
+        // Start recording
         this.mediaRecorder.start(100);
+        const recordingStartTime = performance.now();
         
         // Position mapping for grid
         const cameraPositions = {};
@@ -2781,9 +2802,8 @@ class VideoClipProcessor {
             };
         });
         
-        // Process all segments using requestVideoFrameCallback for precise frame capture
+        // Process all segments with real-time synchronized frame capture
         let processedFrames = 0;
-        const hasVideoFrameCallback = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
         
         for (let i = 0; i < allSegmentVideos.length; i++) {
             const { videos, clipSegment } = allSegmentVideos[i];
@@ -2820,251 +2840,169 @@ class VideoClipProcessor {
             // Seek all videos to clip start position
             for (const video of Object.values(videos)) {
                 video.currentTime = clipSegment.clipStart;
+                video.playbackRate = 1.0; // Ensure normal playback rate
             }
             await Promise.all(Object.values(videos).map(video => 
                 new Promise(resolve => { video.onseeked = resolve; })
             ));
             
-            if (hasVideoFrameCallback) {
-                // Use requestVideoFrameCallback for precise frame capture
-                // Calculate actual end time (use video duration as upper bound)
-                const actualEndTime = Math.min(segmentEndTime, firstVideo.duration);
-                console.log(`Segment ${i + 1}: actualEndTime = ${actualEndTime}, video.duration = ${firstVideo.duration}`);
+            // Use frame-by-frame capture with real-time synchronization
+            const actualEndTime = Math.min(segmentEndTime, firstVideo.duration);
+            const segmentDuration = actualEndTime - clipSegment.clipStart;
+            console.log(`Segment ${i + 1}: clipStart=${clipSegment.clipStart}, actualEndTime=${actualEndTime}, segmentDuration=${segmentDuration}s`);
+            
+            await new Promise((resolve) => {
+                let resolved = false;
+                let lastCapturedTime = 0;
+                const segmentStartRealTime = performance.now();
+                const frameInterval = 1000 / FPS;
+                let frameCount = 0;
                 
-                await new Promise((resolve) => {
-                    let lastFrameTime = -1;
-                    let resolved = false;
+                const captureFrame = () => {
+                    if (resolved) return;
                     
-                    const captureFrame = (now, metadata) => {
-                        // Prevent multiple resolves
-                        if (resolved) return;
-                        
-                        // Check if we've reached the end - use actualEndTime
-                        if (firstVideo.currentTime >= actualEndTime - 0.05 || firstVideo.ended) {
-                            console.log(`Segment ${i + 1} ended: currentTime=${firstVideo.currentTime}, actualEndTime=${actualEndTime}, ended=${firstVideo.ended}`);
-                            resolved = true;
-                            for (const video of Object.values(videos)) {
-                                video.pause();
-                            }
-                            resolve();
-                            return;
-                        }
-                        
-                        // Only capture if this is a new frame
-                        if (metadata.mediaTime !== lastFrameTime) {
-                            lastFrameTime = metadata.mediaTime;
-                            
-                            // Clear canvas
-                            this.ctx.fillStyle = '#000';
-                            this.ctx.fillRect(0, 0, gridCanvasWidth, gridCanvasHeight);
-                            
-                            // Draw each camera view
-                            for (const [camera, video] of videoEntries) {
-                                const pos = cameraPositions[camera] || { x: 0, y: 0 };
-                                const x = pos.x * cellWidth;
-                                const y = pos.y * cellHeight;
-                                
-                                this.ctx.drawImage(video, x, y, cellWidth, cellHeight);
-                                
-                                // Draw camera label
-                                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                                this.ctx.fillRect(x + 10, y + 10, 120, 60);
-                                this.ctx.fillStyle = '#fff';
-                                this.ctx.font = 'bold 36px Arial';
-                                this.ctx.fillText(camera.toUpperCase(), x + 20, y + 54);
-                            }
-                            
-                            // Draw timestamp if needed
-                            if (addTimestamp) {
-                                const currentTime = new Date(segmentStartTimestamp.getTime() + (firstVideo.currentTime - clipSegment.clipStart) * 1000);
-                                const timeString = currentTime.toLocaleString('zh-CN', {
-                                    year: 'numeric',
-                                    month: '2-digit',
-                                    day: '2-digit',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    second: '2-digit',
-                                    hour12: false
-                                }).replace(/\//g, '-');
-                                
-                                // Draw at bottom center
-                                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                                this.ctx.fillRect(gridCanvasWidth / 2 - 300, gridCanvasHeight - 90, 600, 80);
-                                this.ctx.fillStyle = '#fff';
-                                this.ctx.font = 'bold 48px Arial';
-                                this.ctx.textAlign = 'center';
-                                this.ctx.fillText(timeString, gridCanvasWidth / 2, gridCanvasHeight - 35);
-                                this.ctx.textAlign = 'left';
-                            }
-                            
-                            processedFrames++;
-                            
-                            // Update progress every 30 frames
-                            if (processedFrames % 30 === 0) {
-                                const progress = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
-                                progressCallback?.(`处理四宫格: ${progress}%`);
-                            }
-                        }
-                        
-                        // Continue requesting frames only if not resolved
-                        if (!resolved) {
-                            firstVideo.requestVideoFrameCallback(captureFrame);
-                        }
-                    };
+                    const elapsedRealTime = performance.now() - segmentStartRealTime;
+                    const targetVideoTime = clipSegment.clipStart + (elapsedRealTime / 1000);
                     
-                    // Also listen for video ended event as a fallback
-                    firstVideo.onended = () => {
-                        if (!resolved) {
-                            resolved = true;
-                            for (const video of Object.values(videos)) {
-                                video.pause();
-                            }
-                            resolve();
+                    // Check if we've reached the end
+                    if (targetVideoTime >= actualEndTime || firstVideo.ended) {
+                        console.log(`Segment ${i + 1} ended: elapsed=${elapsedRealTime}ms, targetTime=${targetVideoTime}, actualEndTime=${actualEndTime}, frames=${frameCount}`);
+                        resolved = true;
+                        for (const video of Object.values(videos)) {
+                            video.pause();
                         }
-                    };
-                    
-                    // Start all videos
-                    for (const video of Object.values(videos)) {
-                        video.play();
+                        resolve();
+                        return;
                     }
-                    firstVideo.requestVideoFrameCallback(captureFrame);
-                });
-            } else {
-                // Fallback: Use setTimeout-based loop for consistent timing
-                // This is more reliable than requestAnimationFrame when the tab is in background
-                // Calculate actual end time (use video duration as upper bound)
-                const actualEndTime = Math.min(segmentEndTime, firstVideo.duration);
+                    
+                    // Seek all videos to the target time for precise sync
+                    for (const video of Object.values(videos)) {
+                        if (Math.abs(video.currentTime - targetVideoTime) > 0.05) {
+                            video.currentTime = targetVideoTime;
+                        }
+                    }
+                    
+                    lastCapturedTime = firstVideo.currentTime;
+                    
+                    // Clear canvas
+                    this.ctx.fillStyle = '#000';
+                    this.ctx.fillRect(0, 0, gridCanvasWidth, gridCanvasHeight);
+                    
+                    // Draw each camera view
+                    for (const [camera, video] of videoEntries) {
+                        const pos = cameraPositions[camera] || { x: 0, y: 0 };
+                        const x = pos.x * cellWidth;
+                        const y = pos.y * cellHeight;
+                        
+                        this.ctx.drawImage(video, x, y, cellWidth, cellHeight);
+                        
+                        // Draw camera label
+                        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                        this.ctx.fillRect(x + 10, y + 10, 120, 60);
+                        this.ctx.fillStyle = '#fff';
+                        this.ctx.font = 'bold 36px Arial';
+                        this.ctx.fillText(camera.toUpperCase(), x + 20, y + 54);
+                    }
+                    
+                    // Draw timestamp if needed
+                    if (addTimestamp) {
+                        const currentTime = new Date(segmentStartTimestamp.getTime() + (targetVideoTime - clipSegment.clipStart) * 1000);
+                        const timeString = currentTime.toLocaleString('zh-CN', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: false
+                        }).replace(/\//g, '-');
+                        
+                        // Draw at top-right corner
+                        this.ctx.font = 'bold 48px Arial';
+                        const textWidth = this.ctx.measureText(timeString).width;
+                        const padding = 20;
+                        const boxWidth = textWidth + padding * 2;
+                        const boxHeight = 60;
+                        
+                        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                        this.ctx.fillRect(gridCanvasWidth - boxWidth - padding, padding, boxWidth, boxHeight);
+                        this.ctx.fillStyle = '#fff';
+                        this.ctx.textAlign = 'right';
+                        this.ctx.fillText(timeString, gridCanvasWidth - padding * 2, padding + 45);
+                        this.ctx.textAlign = 'left';
+                    }
+                    
+                    frameCount++;
+                    processedFrames++;
+                    
+                    // Update progress every 30 frames
+                    if (processedFrames % 30 === 0) {
+                        const progress = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
+                        progressCallback?.(`处理四宫格: ${progress}%`);
+                    }
+                    
+                    // Schedule next frame at fixed interval for real-time sync
+                    if (!resolved) {
+                        setTimeout(captureFrame, frameInterval);
+                    }
+                };
                 
-                await new Promise((resolve) => {
-                    const frameInterval = 1000 / FPS;
-                    let expectedTime = performance.now();
-                    let resolved = false;
-                    
-                    const processFrame = () => {
-                        // Prevent multiple resolves
-                        if (resolved) return;
-                        
-                        if (firstVideo.ended || firstVideo.currentTime >= actualEndTime - 0.05) {
-                            resolved = true;
-                            for (const video of Object.values(videos)) {
-                                video.pause();
-                            }
-                            resolve();
-                            return;
-                        }
-                        
-                        // Clear canvas
-                        this.ctx.fillStyle = '#000';
-                        this.ctx.fillRect(0, 0, gridCanvasWidth, gridCanvasHeight);
-                        
-                        // Draw each camera view
-                        for (const [camera, video] of videoEntries) {
-                            const pos = cameraPositions[camera] || { x: 0, y: 0 };
-                            const x = pos.x * cellWidth;
-                            const y = pos.y * cellHeight;
-                            
-                            this.ctx.drawImage(video, x, y, cellWidth, cellHeight);
-                            
-                            // Draw camera label
-                            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                            this.ctx.fillRect(x + 10, y + 10, 120, 60);
-                            this.ctx.fillStyle = '#fff';
-                            this.ctx.font = 'bold 36px Arial';
-                            this.ctx.fillText(camera.toUpperCase(), x + 20, y + 54);
-                        }
-                        
-                        // Draw timestamp if needed
-                        if (addTimestamp) {
-                            const currentTime = new Date(segmentStartTimestamp.getTime() + (firstVideo.currentTime - clipSegment.clipStart) * 1000);
-                            const timeString = currentTime.toLocaleString('zh-CN', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                                hour12: false
-                            }).replace(/\//g, '-');
-                            
-                            // Draw at bottom center
-                            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                            this.ctx.fillRect(gridCanvasWidth / 2 - 300, gridCanvasHeight - 90, 600, 80);
-                            this.ctx.fillStyle = '#fff';
-                            this.ctx.font = 'bold 48px Arial';
-                            this.ctx.textAlign = 'center';
-                            this.ctx.fillText(timeString, gridCanvasWidth / 2, gridCanvasHeight - 35);
-                            this.ctx.textAlign = 'left';
-                        }
-                        
-                        processedFrames++;
-                        
-                        // Update progress every 30 frames
-                        if (processedFrames % 30 === 0) {
-                            const progress = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
-                            progressCallback?.(`处理四宫格: ${progress}%`);
-                        }
-                        
-                        // Calculate next frame time with drift correction
-                        expectedTime += frameInterval;
-                        const drift = performance.now() - expectedTime;
-                        const nextDelay = Math.max(0, frameInterval - drift);
-                        
-                        if (!resolved) {
-                            setTimeout(processFrame, nextDelay);
-                        }
-                    };
-                    
-                    // Also listen for video ended event as a fallback
-                    firstVideo.onended = () => {
-                        if (!resolved) {
-                            resolved = true;
-                            for (const video of Object.values(videos)) {
-                                video.pause();
-                            }
-                            resolve();
-                        }
-                    };
-                    
-                    // Start all videos
-                    for (const video of Object.values(videos)) {
-                        video.play();
-                    }
-                    setTimeout(processFrame, 0);
-                });
-            }
+                // Start capturing
+                captureFrame();
+            });
         }
         
-        // Stop recording
+        // Stop recording - add a small delay to ensure all frames are captured
+        await new Promise(resolve => setTimeout(resolve, 200));
         this.mediaRecorder.stop();
         
         const resultBlob = await recordingComplete;
         
-        // Calculate actual duration based on frames
-        const actualDuration = totalDuration * 1000; // Convert to ms
+        // Calculate actual duration based on real recording time
+        const recordingEndTime = performance.now();
+        const actualDuration = recordingEndTime - recordingStartTime;
+        console.log(`[Grid Export] Recording completed. Expected: ${totalDuration * 1000}ms, Actual: ${actualDuration}ms, Frames: ${processedFrames}`);
         
         // Fix WebM duration metadata
         progressCallback?.('修复视频元数据...');
         const fixedBlob = await webmDurationFixer.fixDuration(resultBlob, actualDuration);
         
-        // Clean up
+        // Clean up video elements and blob URLs
         for (const { videos } of allSegmentVideos) {
             for (const video of Object.values(videos)) {
+                video.pause();
                 URL.revokeObjectURL(video.src);
+                video.src = '';
+                video.load(); // 释放视频资源
             }
+        }
+        allSegmentVideos.length = 0; // 清空数组引用
+        
+        // 清理 canvas 和 stream
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
         }
         
         return fixedBlob;
     }
     
     drawTimestamp(timeString) {
-        // Draw background
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        this.ctx.fillRect(10, 10, 380, 50);
+        // Measure text width
+        this.ctx.font = 'bold 28px Arial';
+        const textWidth = this.ctx.measureText(timeString).width;
+        const padding = 15;
+        const boxWidth = textWidth + padding * 2;
+        const boxHeight = 40;
+        const x = this.canvas.width - boxWidth - 20;
+        const y = 20;
+        
+        // Draw background (top-right corner)
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        this.ctx.fillRect(x, y, boxWidth, boxHeight);
         
         // Draw text
         this.ctx.fillStyle = '#fff';
-        this.ctx.font = 'bold 28px Arial';
-        this.ctx.fillText(timeString, 20, 45);
+        this.ctx.fillText(timeString, x + padding, y + 30);
     }
     
     parseTimestamp(timestamp) {
@@ -3137,14 +3075,52 @@ class TeslaCamViewer {
         this.initializeFlatpickr();
         this.loadTheme();
         this.loadLanguage();
+        this.loadLastTeslaCamPath();
+    }
+
+    // 清理旧数据，释放内存
+    cleanupOldData() {
+        // 清理视频播放器
+        if (this.multiCameraPlayer) {
+            this.multiCameraPlayer.cleanup();
+        }
+        
+        // 清理缩略图的 blob URL
+        if (this.eventGroups) {
+            for (const event of this.eventGroups) {
+                if (event.thumbFile && !this.isTauri) {
+                    // Web 环境下的缩略图可能有 blob URL 需要清理
+                    // 但实际上缩略图 URL 在 img.onload 时已经 revoke 了
+                }
+            }
+        }
+        
+        // 清空旧数据引用
+        this.allFiles = [];
+        this.eventGroups = [];
+        this.currentEvent = null;
+        
+        // 强制垃圾回收提示（浏览器可能会忽略）
+        if (window.gc) {
+            window.gc();
+        }
+        
+        console.log('[cleanupOldData] Old data cleaned up');
     }
 
     initializeEventListeners() {
         const useFileInput = !supportsDirectoryPicker();
         
-        this.dom.selectFolderBtn.addEventListener('click', (e) => {
+        this.dom.selectFolderBtn.addEventListener('click', async (e) => {
             e.preventDefault();
             e.stopPropagation();
+            
+            // Tauri 环境下使用 dialog API 选择目录
+            if (this.isTauri) {
+                await this.selectTauriDirectory();
+                return;
+            }
+            
             if (useFileInput) {
                 this.dom.fileInputIOS.click();
             } else {
@@ -3254,6 +3230,40 @@ class TeslaCamViewer {
                 this.hideClipModal();
             }
         });
+    }
+
+    /**
+     * 显示 toast 提示
+     * @param {string} message - 提示消息
+     * @param {string} type - 类型: 'success' | 'error' | 'info'
+     * @param {number} duration - 显示时长(ms)，默认3000
+     */
+    showToast(message, type = 'success', duration = 3000) {
+        let container = document.querySelector('.toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.className = 'toast-container';
+            document.body.appendChild(container);
+        }
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+
+        // 触发重排以启动动画
+        toast.offsetHeight;
+        toast.classList.add('show');
+
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => {
+                toast.remove();
+                if (container.children.length === 0) {
+                    container.remove();
+                }
+            }, 300);
+        }, duration);
     }
 
     initializeFlatpickr() {
@@ -3477,6 +3487,9 @@ class TeslaCamViewer {
     }
 
     async handleFolderSelection(files) {
+        // 清理旧数据，释放内存
+        this.cleanupOldData();
+        
         this.allFiles = Array.from(files);
         
         console.log('[handleFolderSelection] Total files:', this.allFiles.length);
@@ -3748,6 +3761,155 @@ class TeslaCamViewer {
         this.setLanguage(lang);
     }
 
+    /**
+     * 加载上次选择的 TeslaCam 目录
+     */
+    async loadLastTeslaCamPath() {
+        const lastPath = localStorage.getItem('lastTeslaCamPath');
+        if (!lastPath) {
+            console.log('[loadLastTeslaCamPath] No saved path found');
+            return;
+        }
+        
+        console.log('[loadLastTeslaCamPath] Found saved path:', lastPath);
+        
+        // 等待 Tauri API 就绪
+        if (!this.isTauri) {
+            // 浏览器环境下无法自动加载本地路径
+            console.log('[loadLastTeslaCamPath] Not in Tauri environment, skipping auto-load');
+            return;
+        }
+        
+        // 等待一小段时间确保 Tauri API 完全初始化
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const tauri = getTauri();
+        if (!tauri || !tauri.fs) {
+            console.warn('[loadLastTeslaCamPath] Tauri fs API not available');
+            return;
+        }
+        
+        try {
+            // 检查目录是否仍然存在
+            const metadata = await tauri.fs.stat(lastPath);
+            if (!metadata.isDirectory) {
+                console.log('[loadLastTeslaCamPath] Path is not a directory');
+                localStorage.removeItem('lastTeslaCamPath');
+                return;
+            }
+            
+            // 自动加载该目录
+            console.log('[loadLastTeslaCamPath] Auto-loading directory...');
+            await this.loadTauriDirectory(lastPath);
+        } catch (e) {
+            console.warn('[loadLastTeslaCamPath] Failed to load saved path:', e);
+            // 路径不存在或无法访问，清除保存的路径
+            localStorage.removeItem('lastTeslaCamPath');
+        }
+    }
+
+    /**
+     * 使用 Tauri dialog 选择目录
+     */
+    async selectTauriDirectory() {
+        const tauri = getTauri();
+        if (!tauri) return;
+        
+        try {
+            // 获取上次选择的路径作为默认目录
+            const lastPath = localStorage.getItem('lastTeslaCamPath');
+            
+            // 使用 Tauri dialog API 选择目录
+            let dialog = tauri.dialog;
+            if (!dialog && tauri.api) {
+                dialog = tauri.api.dialog;
+            }
+            
+            if (!dialog || !dialog.open) {
+                console.warn('[selectTauriDirectory] Dialog API not available');
+                this.dom.folderInput.click();
+                return;
+            }
+            
+            const selected = await dialog.open({
+                directory: true,
+                multiple: false,
+                title: 'Select TeslaCam Directory',
+                defaultPath: lastPath || undefined
+            });
+            
+            if (!selected) {
+                console.log('[selectTauriDirectory] User cancelled');
+                return;
+            }
+            
+            const path = typeof selected === 'string' ? selected : selected[0];
+            console.log('[selectTauriDirectory] Selected path:', path);
+            
+            await this.loadTauriDirectory(path);
+        } catch (e) {
+            console.error('[selectTauriDirectory] Error:', e);
+            this.showToast('选择目录失败: ' + e.message, 'error');
+        }
+    }
+
+    /**
+     * 加载 Tauri 目录
+     */
+    async loadTauriDirectory(path) {
+        // Show loading state
+        const loadingDiv = document.createElement('div');
+        loadingDiv.id = 'tauri-loading';
+        loadingDiv.style.position = 'fixed';
+        loadingDiv.style.top = '50%';
+        loadingDiv.style.left = '50%';
+        loadingDiv.style.transform = 'translate(-50%, -50%)';
+        loadingDiv.style.padding = '20px';
+        loadingDiv.style.background = 'rgba(0,0,0,0.8)';
+        loadingDiv.style.color = 'white';
+        loadingDiv.style.borderRadius = '10px';
+        loadingDiv.style.zIndex = '9999';
+        loadingDiv.innerText = 'Scanning files...';
+        document.body.appendChild(loadingDiv);
+
+        try {
+            console.log('[loadTauriDirectory] Scanning path:', path);
+            const files = await this.scanTauriFiles(path, path);
+            console.log('[loadTauriDirectory] Found files:', files.length);
+
+            if (files.length > 0) {
+                // Log first few files for debugging
+                files.slice(0, 5).forEach(f => {
+                    console.log('[loadTauriDirectory] Sample file:', f.name, 'webkitRelativePath:', f.webkitRelativePath);
+                });
+                
+                // 检查是否是有效的 TeslaCam 目录
+                const hasTeslaCamSubfolders = files.some(file => 
+                    file.webkitRelativePath.includes('RecentClips/') ||
+                    file.webkitRelativePath.includes('SavedClips/') ||
+                    file.webkitRelativePath.includes('SentryClips/')
+                );
+                
+                if (hasTeslaCamSubfolders) {
+                    // 保存路径到 localStorage
+                    localStorage.setItem('lastTeslaCamPath', path);
+                    console.log('[loadTauriDirectory] Saved path to localStorage');
+                    
+                    await this.handleFolderSelection(files);
+                } else {
+                    this.showToast(i18n[this.currentLanguage].invalidFolder, 'error', 5000);
+                }
+            } else {
+                this.showToast('No files found in the selected folder.', 'error');
+            }
+        } catch (e) {
+            console.error('[loadTauriDirectory] Error:', e);
+            this.showToast('Error reading files: ' + e.message, 'error');
+        } finally {
+            if (loadingDiv) loadingDiv.remove();
+        }
+    }
+
     updateAllUIText(lang) {
         const translations = i18n[lang];
         if (!translations) return;
@@ -3955,7 +4117,7 @@ class TeslaCamViewer {
                     });
                 }
 
-                alert('保存成功!');
+                this.showToast('保存成功!', 'success');
             } catch (e) {
                 console.error('Tauri download failed:', e);
                 const errorMsg = typeof e === 'string' ? e : (e.message || JSON.stringify(e));
@@ -4130,7 +4292,7 @@ class TeslaCamViewer {
                     await writable.close();
 
                     console.log('File saved via File System Access API');
-                    alert('视频保存成功!');
+                    this.showToast('视频保存成功!', 'success');
                 } catch (fsError) {
                     // User cancelled the save dialog or API failed
                     if (fsError.name === 'AbortError') {
@@ -4164,7 +4326,7 @@ class TeslaCamViewer {
                     console.log('Cleanup completed');
                 }, 1000);
                 
-                alert(`视频已下载: ${filename}\n\n提示：如需选择保存位置，请使用Chrome/Edge浏览器或在浏览器设置中开启"下载前询问保存位置"`);
+                this.showToast(`视频已下载: ${filename}`, 'success');
             }
         } catch (downloadError) {
             console.error('Download error:', downloadError);
@@ -4200,6 +4362,7 @@ class TeslaCamViewer {
         this.dom.cancelClipBtn.disabled = true;
         this.dom.clipProgress.style.display = 'block';
         this.dom.clipProgressBar.style.width = '0%';
+        this.dom.clipProgressBar.classList.remove('indeterminate');
         this.dom.clipProgressText.textContent = translations.preparing;
         
         // Ensure buttons state
@@ -4230,12 +4393,29 @@ class TeslaCamViewer {
                 event.startTime,
                 (msg) => {
                     this.dom.clipProgressText.textContent = msg;
-                    // Simulate progress
-                    const currentWidth = parseFloat(this.dom.clipProgressBar.style.width) || 0;
-                    this.dom.clipProgressBar.style.width = Math.min(90, currentWidth + 10) + '%';
+                    // Extract real percentage from message if available
+                    const percentMatch = msg.match(/(\d+)%/);
+                    if (percentMatch) {
+                        // Real progress - remove indeterminate animation
+                        this.dom.clipProgressBar.classList.remove('indeterminate');
+                        const percent = parseInt(percentMatch[1], 10);
+                        this.dom.clipProgressBar.style.width = Math.min(95, percent) + '%';
+                    } else if (msg.includes('FFmpeg') || msg.includes('极速导出')) {
+                        // FFmpeg export - use indeterminate animation
+                        this.dom.clipProgressBar.classList.add('indeterminate');
+                    } else {
+                        // For other non-percentage messages
+                        this.dom.clipProgressBar.classList.remove('indeterminate');
+                        const currentWidth = parseFloat(this.dom.clipProgressBar.style.width) || 0;
+                        if (currentWidth < 30) {
+                            this.dom.clipProgressBar.style.width = Math.min(30, currentWidth + 5) + '%';
+                        }
+                    }
                 },
                 useLocalFFmpeg
             );
+            
+            this.dom.clipProgressBar.classList.remove('indeterminate');
             
             this.dom.clipProgressBar.style.width = '100%';
             
@@ -4269,16 +4449,16 @@ class TeslaCamViewer {
                                 await fs.copyFile(result.path, resolvedSavePath);
                                 // Remove temp file
                                 await fs.remove(result.path);
-                                alert(`保存成功: ${resolvedSavePath}`);
+                                this.showToast('保存成功!', 'success');
                             } else if (resolvedSavePath === result.path) {
-                                alert(`保存成功: ${result.path}`);
+                                this.showToast('保存成功!', 'success');
                             } else {
                                 // User cancelled, keep the file in original location
-                                alert(`视频已保存到: ${result.path}`);
+                                this.showToast(`视频已保存到: ${result.path}`, 'success');
                             }
                         } catch (e) {
                             console.error('File move failed:', e);
-                            alert(`视频已保存到: ${result.path}`);
+                            this.showToast(`视频已保存到: ${result.path}`, 'success');
                         }
                     } else if (result.blob) {
                         // Canvas export - blob needs to be saved
@@ -4312,10 +4492,10 @@ class TeslaCamViewer {
                                 
                                 if (fs && fs.writeFile) {
                                     await fs.writeFile(resolvedSavePath, uint8Array);
-                                } else if (fs && fs.writeBinaryFile) {
+                                } else                                 if (fs && fs.writeBinaryFile) {
                                     await fs.writeBinaryFile(resolvedSavePath, uint8Array);
                                 }
-                                alert('保存成功!');
+                                this.showToast('保存成功!', 'success');
                             }
                         } catch (e) {
                             console.error('Tauri save failed:', e);
@@ -4356,11 +4536,8 @@ class TeslaCamViewer {
                     }
                 }
                 
-                // Re-enable cancel button to allow closing
-                this.dom.cancelClipBtn.disabled = false;
-                this.dom.cancelClipBtn.textContent = '关闭'; 
-                
-                // Hide start button to avoid confusion
+                // Hide both buttons since we have the X close button
+                this.dom.cancelClipBtn.style.display = 'none';
                 this.dom.startClipBtn.style.display = 'none';
             }
             
