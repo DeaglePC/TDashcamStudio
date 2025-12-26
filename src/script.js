@@ -2226,6 +2226,7 @@ class VideoClipProcessor {
                 '-c:v', 'libx264',
                 '-preset', 'fast',
                 '-crf', '23',
+                '-r', '24',
                 '-y',
                 outputPath
             ];
@@ -4312,13 +4313,18 @@ class TeslaCamViewer {
                     for (const result of results) {
                         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
                         const filename = `TeslaCam_${result.camera}_${timestamp}.webm`;
+                        const isGrid = result.camera === 'grid';
+                        const cameraName = isGrid ? '四宫格' : result.camera;
+                        const sizeInMB = result.blob.size / (1024 * 1024);
+                        const sizeText = sizeInMB >= 1 ? `${sizeInMB.toFixed(1)} MB` : `${(result.blob.size / 1024).toFixed(0)} KB`;
                         
                         const btn = document.createElement('button');
-                        btn.className = 'map-btn';
-                        btn.style.backgroundColor = '#28a745';
-                        btn.style.width = '100%';
-                        btn.style.marginTop = '5px';
-                        btn.textContent = `保存 ${result.camera === 'grid' ? '四宫格' : result.camera} 视频`;
+                        btn.className = `download-btn${isGrid ? ' grid-btn' : ''}`;
+                        btn.innerHTML = `
+                            <span class="btn-icon">💾</span>
+                            <span class="btn-text">保存 ${cameraName} 视频</span>
+                            <span class="btn-size">${sizeText}</span>
+                        `;
                         btn.onclick = () => this.saveVideoFile(result.blob, filename);
                         downloadButtons.appendChild(btn);
                     }
