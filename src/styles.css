@@ -673,7 +673,10 @@ body.dark-theme #eventFilter {
     transition: opacity 0.2s;
 }
 
-.video-container.is-pip .camera-label {
+.video-container.is-pip .camera-label,
+.video-container.is-grid .camera-label,
+.video-container.is-main .camera-label,
+.video-container.is-active-single .camera-label {
     opacity: 1;
 }
 

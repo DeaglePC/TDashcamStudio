@@ -400,6 +400,85 @@ class MultiCameraPlayer {
         this.isSeeking = false;
         this.playbackRate = 1.0;
         this.lastSyncTime = 0;
+        
+        // Start label loop
+        this.startRenderLoop();
+    }
+    
+    // Start render loop for labels
+    startRenderLoop() {
+        if (this.renderLoopRunning) return;
+        this.renderLoopRunning = true;
+        this.renderLoop();
+    }
+
+    renderLoop() {
+        const isGrid = ['grid', 'grid4'].includes(this.layoutMode);
+        
+        if (isGrid) {
+            // Check active views to determine layout
+            const views = this.layoutMode === 'grid' ?
+                ['left_pillar', 'front', 'right_pillar', 'left', 'back', 'right'] : // 6-grid (grid)
+                ['front', 'back', 'left', 'right']; // 4-grid (grid4)
+
+            // Iterate over each view container and add/update labels
+            views.forEach(camera => {
+                const container = this.playerContainers[camera];
+                if (container) {
+                     let label = container.querySelector('.camera-label');
+                     if (!label) {
+                         label = document.createElement('div');
+                         label.className = 'camera-label';
+                         // Style is handled in CSS, but ensure it exists
+                         label.style.position = 'absolute';
+                         label.style.top = '10px';
+                         label.style.left = '10px';
+                         label.style.color = 'white';
+                         label.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                         label.style.padding = '5px 10px';
+                         label.style.fontSize = '14px';
+                         label.style.pointerEvents = 'none';
+                         label.style.zIndex = '10';
+                         container.appendChild(label);
+                     }
+                     // Set localized text (Simple check for window.viewer global or fallback)
+                     // Note: We access window.viewer carefully
+                     const lang = (window.viewer && window.viewer.currentLanguage) || 'zh';
+                     const cameraNames = {
+                        front: { en: 'Front', zh: '前视' },
+                        left_pillar: { en: 'Left Pillar', zh: '左柱' },
+                        right_pillar: { en: 'Right Pillar', zh: '右柱' },
+                        back: { en: 'Back', zh: '后视' },
+                        left: { en: 'Left', zh: '左侧' },
+                        right: { en: 'Right', zh: '右侧' }
+                     };
+                     label.innerText = cameraNames[camera]?.[lang] || camera;
+                     label.style.display = 'block';
+                }
+            });
+            
+             // Hide labels for inactive cameras in the grid
+             Object.keys(this.playerContainers).forEach(key => {
+                 if (!views.includes(key)) {
+                     const container = this.playerContainers[key];
+                     if (container) {
+                        const label = container.querySelector('.camera-label');
+                        if (label) label.style.display = 'none';
+                     }
+                 }
+             });
+
+        } else {
+             // Single/Legacy view mode: Revert to CSS control (Single hidden by opacity, Legacy PIP shown by opacity)
+             Object.values(this.playerContainers).forEach(container => {
+                 if (container) {
+                    const label = container.querySelector('.camera-label');
+                    if (label) label.style.display = '';
+                 }
+             });
+        }
+
+        requestAnimationFrame(() => this.renderLoop());
     }
 
     setLayout(mode) {
@@ -1949,8 +2028,10 @@ class VideoClipProcessor {
         }
     }
 
-    async processClip(segments, cameras, startTime, endTime, addTimestamp, mergeGrid, eventStartTime, progressCallback, useLocalFFmpeg = false) {
+    async processClip(segments, cameras, startTime, endTime, addTimestamp, mergeGrid, eventStartTime, progressCallback, useLocalFFmpeg = false, language = 'zh') {
         try {
+            // Store language for use in processing methods
+            this.currentLanguage = language;
             // Calculate which segments are needed
             const clipSegments = this.getSegmentsForTimeRange(segments, startTime, endTime);
             
@@ -2100,8 +2181,16 @@ class VideoClipProcessor {
                     startEpoch
                 });
                 
+                // Determine font file path based on OS (use CJK-compatible font)
+                let fontOption = "";
+                if (navigator.userAgent.includes('Windows')) {
+                    fontOption = "fontfile='C\\:/Windows/Fonts/msyh.ttc':";
+                } else if (navigator.userAgent.includes('Mac')) {
+                    fontOption = "fontfile='/System/Library/Fonts/PingFang.ttc':";
+                }
+
                 // drawtext filter for timestamp (top-right corner)
-                const drawtext = `drawtext=text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=w-text_w-20:y=20:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.5`;
+                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
                 
                 args = [
                     '-f', 'concat',
@@ -2162,8 +2251,27 @@ class VideoClipProcessor {
         const tauri = window.__TAURI__;
         const fs = tauri.fs;
         const shell = tauri.shell;
+
+        // Sort cameras for 6-grid layout
+        let sortedCameras = [...cameras];
+        if (cameras.length > 4) {
+            const sortOrder = ['left_pillar', 'front', 'right_pillar', 'left', 'back', 'right'];
+            sortedCameras.sort((a, b) => {
+                const idxA = sortOrder.indexOf(a);
+                const idxB = sortOrder.indexOf(b);
+                return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+            });
+        } else {
+             // Standard layout for <= 4 cameras
+             const sortOrder = ['front', 'back', 'left', 'right', 'left_pillar', 'right_pillar'];
+             sortedCameras.sort((a, b) => {
+                const idxA = sortOrder.indexOf(a);
+                const idxB = sortOrder.indexOf(b);
+                return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+            });
+        }
         
-        const firstFile = clipSegments[0].segment.files[cameras[0]];
+        const firstFile = clipSegments[0].segment.files[sortedCameras[0]];
         if (!firstFile || !firstFile.path) throw new Error('文件路径未找到');
         
         const pathSeparator = firstFile.path.includes('\\') ? '\\' : '/';
@@ -2178,7 +2286,7 @@ class VideoClipProcessor {
         const inputArgs = [];
         
         try {
-            for (const camera of cameras) {
+            for (const camera of sortedCameras) {
                 const listFilename = `ffmpeg_list_${camera}_${timestamp}.txt`;
                 const listPath = `${workDir}${pathSeparator}${listFilename}`;
                 tempFiles.push(listPath);
@@ -2198,12 +2306,35 @@ class VideoClipProcessor {
             }
             
             // Build filter for grid layout
-            const count = cameras.length;
+            const count = sortedCameras.length;
             let filterComplex = '';
             
-            // Scale each input
+            // Camera names for localization
+            const lang = this.currentLanguage || 'zh';
+            const cameraNames = {
+                front: { en: 'Front', zh: '前视' },
+                left_pillar: { en: 'Left Pillar', zh: '左柱' },
+                right_pillar: { en: 'Right Pillar', zh: '右柱' },
+                back: { en: 'Back', zh: '后视' },
+                left: { en: 'Left', zh: '左侧' },
+                right: { en: 'Right', zh: '右侧' }
+            };
+
+            // Scale each input and add label
             for (let i = 0; i < count; i++) {
-                filterComplex += `[${i}:v]scale=960:540[v${i}];`;
+                const camName = sortedCameras[i];
+                const labelText = cameraNames[camName]?.[lang] || camName.toUpperCase();
+                
+                // Determine font file path based on OS for labels (use CJK-compatible font)
+                let fontOption = "";
+                if (navigator.userAgent.includes('Windows')) {
+                    fontOption = "fontfile='C\\:/Windows/Fonts/msyh.ttc':";
+                } else if (navigator.userAgent.includes('Mac')) {
+                    fontOption = "fontfile='/System/Library/Fonts/PingFang.ttc':";
+                }
+
+                const drawLabel = `drawtext=${fontOption}text='${labelText}':x=10:y=10:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.5`;
+                filterComplex += `[${i}:v]scale=960:540,${drawLabel}[v${i}];`;
             }
             
             // Stack layout
@@ -2211,15 +2342,18 @@ class VideoClipProcessor {
             if (count === 2) {
                 stackFilter = `[v0][v1]hstack=inputs=2[grid]`;
             } else if (count === 3) {
-                stackFilter = `[v0][v1]hstack=inputs=2[top];[top][v2]vstack=inputs=2[grid]`;
+                // Top: 2 videos (1920px), Bottom: 1 video (960px) -> Pad bottom to 1920px (center aligned)
+                stackFilter = `[v0][v1]hstack=inputs=2[top];[v2]pad=1920:540:480:0[v2_padded];[top][v2_padded]vstack=inputs=2[grid]`;
             } else if (count === 4) {
                 stackFilter = `[v0][v1]hstack=inputs=2[top];[v2][v3]hstack=inputs=2[bottom];[top][bottom]vstack=inputs=2[grid]`;
             } else if (count >= 5) {
-                // 3x2 grid
+                // 3x2 grid. Top row is always 3 videos (2880px).
                 stackFilter = `[v0][v1][v2]hstack=inputs=3[top];`;
                 if (count === 5) {
-                    stackFilter += `[v3][v4]hstack=inputs=2[bottom];[top][bottom]vstack=inputs=2[grid]`;
+                    // Bottom: 2 videos (1920px) -> Pad to 2880px (center aligned: (2880-1920)/2 = 480)
+                    stackFilter += `[v3][v4]hstack=inputs=2,pad=2880:540:480:0[bottom];[top][bottom]vstack=inputs=2[grid]`;
                 } else {
+                    // Bottom: 3 videos (2880px)
                     stackFilter += `[v3][v4][v5]hstack=inputs=3[bottom];[top][bottom]vstack=inputs=2[grid]`;
                 }
             } else {
@@ -2232,7 +2366,7 @@ class VideoClipProcessor {
             let finalOutput = '[grid]';
             if (addTimestamp) {
                 // Extract full timestamp (with seconds) from filename
-                const firstFile = clipSegments[0].segment.files[cameras[0]];
+                const firstFile = clipSegments[0].segment.files[sortedCameras[0]];
                 const fileName = firstFile.name || firstFile.path.split(/[/\\]/).pop();
                 const fullTimestampMatch = fileName.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
                 
@@ -2246,7 +2380,14 @@ class VideoClipProcessor {
                 const clipStartTimeObj = new Date(firstSegTime.getTime() + clipSegments[0].clipStart * 1000);
                 const startEpoch = Math.floor(clipStartTimeObj.getTime() / 1000);
                 
-                const drawtext = `drawtext=text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=w-text_w-20:y=20:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.5`;
+                let fontOption = "";
+                if (navigator.userAgent.includes('Windows')) {
+                    fontOption = "fontfile='C\\:/Windows/Fonts/msyh.ttc':";
+                } else if (navigator.userAgent.includes('Mac')) {
+                    fontOption = "fontfile='/System/Library/Fonts/PingFang.ttc':";
+                }
+                
+                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
                 filterComplex += `;[grid]${drawtext}[final]`;
                 finalOutput = '[final]';
             }
@@ -2897,11 +3038,24 @@ class VideoClipProcessor {
                         this.ctx.drawImage(video, x, y, cellWidth, cellHeight);
                         
                         // Draw camera label
-                        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                        this.ctx.fillRect(x + 10, y + 10, 120, 60);
+                        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                        this.ctx.fillRect(x + 10, y + 10, 150, 40);
                         this.ctx.fillStyle = '#fff';
-                        this.ctx.font = 'bold 36px Arial';
-                        this.ctx.fillText(camera.toUpperCase(), x + 20, y + 54);
+                        this.ctx.font = 'bold 24px Arial';
+                        
+                        // Localize camera name
+                        const lang = this.currentLanguage || 'zh';
+                        const cameraNames = {
+                            front: { en: 'Front', zh: '前视' },
+                            left_pillar: { en: 'Left Pillar', zh: '左柱' },
+                            right_pillar: { en: 'Right Pillar', zh: '右柱' },
+                            back: { en: 'Back', zh: '后视' },
+                            left: { en: 'Left', zh: '左侧' },
+                            right: { en: 'Right', zh: '右侧' }
+                        };
+                        const labelText = cameraNames[camera]?.[lang] || camera.toUpperCase();
+                        
+                        this.ctx.fillText(labelText, x + 20, y + 38);
                     }
                     
                     // Draw timestamp if needed
@@ -4412,7 +4566,8 @@ class TeslaCamViewer {
                         }
                     }
                 },
-                useLocalFFmpeg
+                useLocalFFmpeg,
+                this.currentLanguage
             );
             
             this.dom.clipProgressBar.classList.remove('indeterminate');
