@@ -41,6 +41,11 @@
           "cmd": "ffmpeg",
           "args": true,
           "sidecar": false
+        },
+        {
+          "name": "binaries/ffmpeg",
+          "sidecar": true,
+          "args": true
         }
       ]
     }

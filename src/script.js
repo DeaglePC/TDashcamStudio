@@ -1829,15 +1829,41 @@ class VideoClipProcessor {
             return false;
         }
         try {
-            console.log('[FFmpeg] Checking FFmpeg availability...');
+            console.log('[FFmpeg] Checking bundled FFmpeg availability...');
+            // Try bundled FFmpeg first (sidecar)
+            try {
+                const sidecarCommand = tauri.shell.Command.sidecar('binaries/ffmpeg', ['-version']);
+                const sidecarOutput = await sidecarCommand.execute();
+                if (sidecarOutput.code === 0) {
+                    console.log('[FFmpeg] Bundled FFmpeg available');
+                    this.ffmpegCommand = 'sidecar';
+                    return true;
+                }
+            } catch (e) {
+                console.log('[FFmpeg] Bundled FFmpeg not available, trying system FFmpeg...');
+            }
+            
+            // Fallback to system FFmpeg
             const command = tauri.shell.Command.create('ffmpeg', ['-version']);
             const output = await command.execute();
-            console.log('[FFmpeg] Check result:', output);
-            return output.code === 0;
+            console.log('[FFmpeg] System FFmpeg check result:', output);
+            if (output.code === 0) {
+                this.ffmpegCommand = 'system';
+                return true;
+            }
+            return false;
         } catch (e) {
             console.warn('[FFmpeg] Check failed:', e);
             return false;
         }
+    }
+    
+    createFFmpegCommand(args) {
+        const tauri = window.__TAURI__;
+        if (this.ffmpegCommand === 'sidecar') {
+            return tauri.shell.Command.sidecar('binaries/ffmpeg', args);
+        }
+        return tauri.shell.Command.create('ffmpeg', args);
     }
 
     async processWithFFmpeg(clipSegments, camera, progressCallback) {
@@ -1892,7 +1918,7 @@ class VideoClipProcessor {
             console.log('Running ffmpeg:', args);
             progressCallback?.(`FFmpeg 导出中...`);
             
-            const command = shell.Command.create('ffmpeg', args);
+            const command = this.createFFmpegCommand(args);
             const output = await command.execute();
             
             if (output.code !== 0) {
@@ -2098,7 +2124,7 @@ class VideoClipProcessor {
             console.log('[FFmpeg] Running:', args.join(' '));
             progressCallback?.(`FFmpeg 处理 ${camera}...`);
             
-            const command = shell.Command.create('ffmpeg', args);
+            const command = this.createFFmpegCommand(args);
             let output;
             try {
                 output = await command.execute();
@@ -2234,7 +2260,7 @@ class VideoClipProcessor {
             console.log('[FFmpeg Grid] Running:', args.join(' '));
             progressCallback?.('FFmpeg 合成四宫格...');
             
-            const command = shell.Command.create('ffmpeg', args);
+            const command = this.createFFmpegCommand(args);
             let output;
             try {
                 output = await command.execute();

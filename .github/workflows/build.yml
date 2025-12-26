@@ -18,15 +18,19 @@ jobs:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             name: 'macOS-ARM64'
+            ffmpeg_suffix: 'aarch64-apple-darwin'
           - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
             name: 'macOS-x64'
+            ffmpeg_suffix: 'x86_64-apple-darwin'
           - platform: 'ubuntu-22.04'
             args: ''
             name: 'Linux-x64'
+            ffmpeg_suffix: 'x86_64-unknown-linux-gnu'
           - platform: 'windows-latest'
             args: ''
             name: 'Windows-x64'
+            ffmpeg_suffix: 'x86_64-pc-windows-msvc'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -50,6 +54,47 @@ jobs:
             sed -i '' 's/"version": "[^"]*"/"version": "${{ steps.get_version.outputs.VERSION }}"/' src-tauri/tauri.conf.json 2>/dev/null || sed -i 's/"version": "[^"]*"/"version": "${{ steps.get_version.outputs.VERSION }}"/' src-tauri/tauri.conf.json
           fi
           cat src-tauri/tauri.conf.json | grep version
+
+      - name: Download FFmpeg (macOS)
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          # Download FFmpeg for macOS
+          if [[ "${{ matrix.ffmpeg_suffix }}" == "aarch64-apple-darwin" ]]; then
+            curl -L "https://www.osxexperts.net/ffmpeg7arm.zip" -o ffmpeg.zip
+            unzip ffmpeg.zip
+            mv ffmpeg src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+          else
+            curl -L "https://www.osxexperts.net/ffmpeg7intel.zip" -o ffmpeg.zip
+            unzip ffmpeg.zip
+            mv ffmpeg src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+          fi
+          chmod +x src-tauri/binaries/ffmpeg-*
+          ls -la src-tauri/binaries/
+
+      - name: Download FFmpeg (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          mkdir -p src-tauri/binaries
+          # Download static FFmpeg for Linux
+          curl -L "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" -o ffmpeg.tar.xz
+          tar xf ffmpeg.tar.xz
+          mv ffmpeg-*-amd64-static/ffmpeg src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu
+          chmod +x src-tauri/binaries/ffmpeg-*
+          ls -la src-tauri/binaries/
+
+      - name: Download FFmpeg (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries
+          # Download FFmpeg for Windows
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath .
+          $ffmpegDir = Get-ChildItem -Directory -Filter "ffmpeg-*-essentials_build" | Select-Object -First 1
+          Copy-Item "$($ffmpegDir.FullName)/bin/ffmpeg.exe" -Destination "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
+          Get-ChildItem src-tauri/binaries/
 
       - name: Setup Node
         uses: actions/setup-node@v4
