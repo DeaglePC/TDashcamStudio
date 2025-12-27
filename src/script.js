@@ -1729,10 +1729,35 @@ class VideoClipProcessor {
         this.recordingStartTime = null;
         this.ffmpeg = null;
     }
+
+    formatBytes(bytes) {
+        if (typeof bytes !== 'number') return 'n/a';
+        const MB = 1024 * 1024;
+        if (bytes < MB) return `${bytes.toFixed(0)} B`;
+        return `${(bytes / MB).toFixed(2)} MB`;
+    }
+
+    logMemory(label, extra = {}) {
+        try {
+            const mem = performance?.memory;
+            const payload = {
+                ...extra,
+            };
+            if (mem) {
+                payload.usedJSHeapSize = this.formatBytes(mem.usedJSHeapSize);
+                payload.totalJSHeapSize = this.formatBytes(mem.totalJSHeapSize);
+                payload.jsHeapSizeLimit = this.formatBytes(mem.jsHeapSizeLimit);
+            }
+            console.log(`[Mem][Grid] ${label}`, payload);
+        } catch (err) {
+            console.warn('logMemory failed', err);
+        }
+    }
     
     // Clean up resources to prevent memory leaks
     cleanup() {
         console.log('[VideoClipProcessor] Cleaning up resources...');
+
         
         // Clear canvas
         if (this.ctx && this.canvas) {
@@ -1767,11 +1792,12 @@ class VideoClipProcessor {
     async loadFFmpeg(progressCallback) {
         if (this.ffmpeg && this.ffmpegLoaded) return this.ffmpeg;
         
-        // UMD build exposes FFmpegWASM global
-        const FFmpegLib = window.FFmpegWASM;
+        // Try different global names for FFmpeg WASM library
+        // CDN UMD build exposes FFmpegWASM global
+        const FFmpegLib = window.FFmpegWASM || window.FFmpeg;
         
         if (!FFmpegLib) {
-            throw new Error('FFmpeg WASM library not loaded.');
+            throw new Error('FFmpeg WASM library not loaded. Please check if the script is included.');
         }
 
         const { FFmpeg } = FFmpegLib;
@@ -1783,26 +1809,71 @@ class VideoClipProcessor {
                 console.log('[FFmpeg]', message);
             });
             
+            // Use arrow function to capture 'this' and access current progress callback
             this.ffmpeg.on('progress', ({ progress, time }) => {
                  // progress is 0-1
-                 if(progressCallback) progressCallback(`编码中... ${(progress * 100).toFixed(0)}%`);
+                 if (this.ffmpegProgressCallback) {
+                     this.ffmpegProgressCallback(`编码中... ${(progress * 100).toFixed(0)}%`);
+                 }
             });
         }
 
-        progressCallback?.('加载 FFmpeg 核心模块 (首次约需10秒)...');
-        console.log('[FFmpeg] Loading FFmpeg WASM core...');
+        // Check if multi-threading is supported (requires COOP/COEP headers)
+        const supportsMultiThread = typeof SharedArrayBuffer !== 'undefined';
+        const useMultiThread = supportsMultiThread; // Re-enabled with scale optimization
+        
+        if (useMultiThread) {
+            progressCallback?.('加载 FFmpeg 多线程核心模块...');
+            console.log('[FFmpeg] Loading FFmpeg WASM core (multi-threaded)...');
+        } else {
+            progressCallback?.('加载 FFmpeg 核心模块...');
+            console.log('[FFmpeg] Loading FFmpeg WASM core (single-threaded)...');
+        }
+        
         const startTime = performance.now();
         
-        // Load from local files
-        const baseURL = 'libs/ffmpeg';
-        await this.ffmpeg.load({
-            coreURL: `${baseURL}/ffmpeg-core.js`,
-            wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-        });
+        // Load from local files for faster loading and offline support
+        // Must use absolute URLs for ffmpeg.wasm to work correctly
+        const baseURL = new URL('libs/ffmpeg', window.location.href).href;
+        
+        try {
+            if (useMultiThread) {
+                // Multi-threaded version - faster but requires COOP/COEP headers
+                await this.ffmpeg.load({
+                    coreURL: `${baseURL}/ffmpeg-core-mt.js`,
+                    wasmURL: `${baseURL}/ffmpeg-core-mt.wasm`,
+                    workerURL: `${baseURL}/ffmpeg-core.worker.js`,
+                    classWorkerURL: `${baseURL}/814.ffmpeg.js`,
+                });
+                this.ffmpegMultiThread = true;
+            } else {
+                // Single-threaded version - more stable
+                await this.ffmpeg.load({
+                    coreURL: `${baseURL}/ffmpeg-core.js`,
+                    wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+                    classWorkerURL: `${baseURL}/814.ffmpeg.js`,
+                });
+                this.ffmpegMultiThread = false;
+            }
+        } catch (mtError) {
+            // If multi-thread fails, fallback to single-thread
+            if (useMultiThread) {
+                console.warn('[FFmpeg] Multi-thread load failed, falling back to single-thread:', mtError);
+                progressCallback?.('多线程加载失败，使用单线程模式...');
+                await this.ffmpeg.load({
+                    coreURL: `${baseURL}/ffmpeg-core.js`,
+                    wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+                    classWorkerURL: `${baseURL}/814.ffmpeg.js`,
+                });
+                this.ffmpegMultiThread = false;
+            } else {
+                throw mtError;
+            }
+        }
         
         this.ffmpegLoaded = true;
         const loadTime = ((performance.now() - startTime) / 1000).toFixed(1);
-        console.log(`[FFmpeg] FFmpeg WASM loaded successfully in ${loadTime}s`);
+        console.log(`[FFmpeg] FFmpeg WASM loaded successfully in ${loadTime}s (multi-thread: ${this.ffmpegMultiThread})`);
         return this.ffmpeg;
     }
     
@@ -1822,15 +1893,27 @@ class VideoClipProcessor {
         throw new Error('Unsupported file type');
     }
 
-    async processWithFFmpegWasm(clipSegments, cameras, startTime, endTime, addTimestamp, mergeGrid, eventStartTime, progressCallback) {
+    async processWithFFmpegWasm(clipSegments, cameras, startTime, endTime, addTimestamp, mergeGrid, eventStartTime, progressCallback, fileHandle = null) {
+        // Set the progress callback for FFmpeg events
+        this.ffmpegProgressCallback = progressCallback;
+        
         const ffmpeg = await this.loadFFmpeg(progressCallback);
         
-        const createdFiles = [];
+        // Track all temporary files to ensure cleanup
+        const allCreatedFiles = [];
+        
+        // Prepare writable stream if available
+        let writable = null;
+        if (fileHandle) {
+             try {
+                 writable = await fileHandle.createWritable();
+             } catch(e) {
+                 console.warn("Create writable stream failed, fallback to memory mode", e);
+             }
+        }
         
         try {
-            // 1. Prepare input files
-            progressCallback?.('读取文件...');
-            
+            // Sort cameras for grid layout consistency
             let sortedCameras = cameras;
             if (mergeGrid) {
                  const order = ['front', 'back', 'left', 'right', 'left_pillar', 'right_pillar'];
@@ -1841,179 +1924,258 @@ class VideoClipProcessor {
                  });
             }
 
-            const cameraInputs = {}; // camera -> [filenames]
-            
-            for (const seg of clipSegments) {
-                for (const cam of sortedCameras) {
-                    const file = seg.segment.files[cam];
-                    if (!file) continue;
-                    
-                    const filename = `seg_${seg.segmentIndex}_${cam}.mp4`;
-                    if (!createdFiles.includes(filename)) {
-                        let data;
-                        if (file.path && window.__TAURI__) {
-                             data = await window.__TAURI__.fs.readFile(file.path);
-                        } else {
-                             // Web mode - use our helper function
-                             data = await this.fetchFileAsUint8Array(file);
-                        }
-                        await ffmpeg.writeFile(filename, data);
-                        createdFiles.push(filename);
-                    }
-                    
-                    if (!cameraInputs[cam]) cameraInputs[cam] = [];
-                    cameraInputs[cam].push({
-                        filename,
-                        duration: seg.segment.duration || 60 
-                    });
-                }
-            }
-
-            // 2. Load Font if needed
+            // Load Font if needed (once)
             let fontFile = null;
             if (addTimestamp) {
                 progressCallback?.('加载字体...');
                 try {
-                     const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Regular.ttf';
+                     const fontUrl = 'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf';
                      const fontData = await this.fetchFileAsUint8Array(fontUrl);
                      await ffmpeg.writeFile('font.ttf', fontData);
                      fontFile = 'font.ttf';
+                     allCreatedFiles.push('font.ttf');
                 } catch (e) {
                      console.warn('Font load failed, timestamp disabled', e);
                      addTimestamp = false;
                 }
             }
 
-            // 3. Build Filter Graph
-            progressCallback?.('构建处理流程...');
+            // Process each segment sequentially to save memory
+            // Use TS (MPEG-TS) for intermediate segments as it's streamable
+            const tsBlobs = [];
             
-            let filterComplex = '';
-            let inputIdx = 0;
-            const cameraStreamNames = [];
-            
-            // Timestamp calculation setup
-            // Extract full timestamp (with seconds) from filename
-            const firstCam = sortedCameras[0];
-            const firstFile = clipSegments[0].segment.files[firstCam];
-            const fileName = firstFile?.name || (firstFile?.path ? firstFile.path.split(/[/\\]/).pop() : null);
-            const fullTimestampMatch = fileName?.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
-            
-            let firstSegTime;
-            if (fullTimestampMatch) {
-                firstSegTime = this.parseTimestamp(fullTimestampMatch[1]);
-            } else {
-                firstSegTime = this.parseTimestamp(clipSegments[0].timestamp);
-            }
-            
-            const clipStartTimeObj = new Date(firstSegTime.getTime() + clipSegments[0].clipStart * 1000);
-            // FFmpeg's localtime uses seconds since epoch
-            const startEpoch = Math.floor(clipStartTimeObj.getTime() / 1000);
-
-            for (const cam of sortedCameras) {
-                const inputs = cameraInputs[cam];
-                if (!inputs || inputs.length === 0) continue;
+            for (let i = 0; i < clipSegments.length; i++) {
+                const seg = clipSegments[i];
+                const segmentFiles = []; // Files for this segment only
                 
-                // Concat segments
-                let segStreamName = `[v_${cam}_concat]`;
-                if (inputs.length > 1) {
-                    for (let i = 0; i < inputs.length; i++) {
-                        filterComplex += `[${inputIdx}:v]`;
-                        inputIdx++;
+                progressCallback?.(`处理片段 ${i + 1}/${clipSegments.length}...`);
+                
+                const cameraInputs = {};
+                
+                // 1. Write input files for this segment
+                for (const cam of sortedCameras) {
+                    const file = seg.segment.files[cam];
+                    if (!file) continue;
+                    
+                    const filename = `s${i}_${cam}.mp4`;
+                    let data;
+                    if (file.path && window.__TAURI__) {
+                         data = await window.__TAURI__.fs.readFile(file.path);
+                    } else {
+                         data = await this.fetchFileAsUint8Array(file);
                     }
-                    filterComplex += `concat=n=${inputs.length}:v=1:a=0${segStreamName};`;
-                } else {
-                    segStreamName = `[${inputIdx}:v]`;
+                    
+                    await ffmpeg.writeFile(filename, data);
+                    segmentFiles.push(filename);
+                    if (!cameraInputs[cam]) cameraInputs[cam] = [];
+                    cameraInputs[cam].push(filename);
+                    
+                    // Allow GC
+                    data = null;
+                }
+                
+                // 2. Build filter graph for this segment
+                let filterComplex = '';
+                let inputIdx = 0;
+                const cameraStreamNames = [];
+                
+                // Calculate timestamp for this segment
+                let segmentTimestampStr = '';
+                if (addTimestamp) {
+                    // Base timestamp from file or fallback
+                    const firstCam = sortedCameras[0];
+                    const firstFile = seg.segment.files[firstCam];
+                    const fileName = firstFile?.name || (firstFile?.path ? firstFile.path.split(/[/\\]/).pop() : null);
+                    const fullTimestampMatch = fileName?.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
+                    
+                    let segBaseTime;
+                    if (fullTimestampMatch) {
+                        segBaseTime = this.parseTimestamp(fullTimestampMatch[1]);
+                    } else {
+                        segBaseTime = this.parseTimestamp(seg.timestamp);
+                    }
+                    
+                    // Add clipStart offset
+                    const currentSegTime = new Date(segBaseTime.getTime() + seg.clipStart * 1000);
+                    
+                    segmentTimestampStr = currentSegTime.toLocaleString('zh-CN', {
+                        year: 'numeric', month: '2-digit', day: '2-digit',
+                        hour: '2-digit', minute: '2-digit', second: '2-digit',
+                        hour12: false
+                    }).replace(/\//g, '-');
+                }
+
+                // Build inputs and filters
+                for (const cam of sortedCameras) {
+                    if (!cameraInputs[cam]) continue;
+                    
+                    // Since we process one segment, there is only one file per camera here
+                    const inputFile = cameraInputs[cam][0];
+                    const inputStream = `[${inputIdx}:v]`;
                     inputIdx++;
+                    
+                    const trimmedStream = `[v_${cam}_trimmed]`;
+                    // Use segment-specific clip duration
+                    const duration = seg.clipEnd - seg.clipStart;
+                    
+                    filterComplex += `${inputStream}trim=start=${seg.clipStart}:duration=${duration},setpts=PTS-STARTPTS${trimmedStream};`;
+                    cameraStreamNames.push({ name: trimmedStream, cam });
                 }
                 
-                // Trim
-                // We trim relative to the concatenated stream (which starts at 0 = segment start)
-                const trimStart = clipSegments[0].clipStart;
-                const wantedDuration = endTime - startTime;
+                let finalStream = '';
                 
-                const trimmedStream = `[v_${cam}_trimmed]`;
-                filterComplex += `${segStreamName}trim=start=${trimStart}:duration=${wantedDuration},setpts=PTS-STARTPTS${trimmedStream};`;
-                
-                cameraStreamNames.push({ name: trimmedStream, cam });
-            }
-            
-            let finalStream = '';
-            
-            // Grid or Single
-            if (mergeGrid && cameraStreamNames.length > 1) {
-                // Scale to 960x540 for grid
-                const scaledStreams = [];
-                for (const {name, cam} of cameraStreamNames) {
-                    const scaledName = `[v_${cam}_scaled]`;
-                    filterComplex += `${name}scale=960:540${scaledName};`;
-                    scaledStreams.push(scaledName);
+                if (mergeGrid && cameraStreamNames.length > 1) {
+                    // Grid logic
+                    const scaledStreams = [];
+                    for (const {name, cam} of cameraStreamNames) {
+                        const scaledName = `[v_${cam}_scaled]`;
+                        filterComplex += `${name}scale=960:540${scaledName};`;
+                        scaledStreams.push(scaledName);
+                    }
+                    
+                    const count = scaledStreams.length;
+                    let stackLayout = '';
+                    if (count === 4) stackLayout = '0_0|w0_0|0_h0|w0_h0';
+                    else if (count === 2) stackLayout = '0_0|w0_0';
+                    else if (count === 3) stackLayout = '0_0|w0_0|0_h0';
+                    else if (count === 6) stackLayout = '0_0|w0_0|w0+w1_0|0_h0|w0_h0|w0+w1_h0';
+                    else stackLayout = '0_0';
+                    
+                    finalStream = `[v_grid]`;
+                    filterComplex += `${scaledStreams.join('')}xstack=inputs=${count}:layout=${stackLayout}${finalStream};`;
+                } else {
+                    finalStream = cameraStreamNames[0].name;
                 }
                 
-                const count = scaledStreams.length;
-                let stackLayout = '';
-                if (count === 4) stackLayout = '0_0|w0_0|0_h0|w0_h0';
-                else if (count === 2) stackLayout = '0_0|w0_0';
-                else if (count === 3) stackLayout = '0_0|w0_0|0_h0';
-                else if (count === 6) stackLayout = '0_0|w0_0|w0+w1_0|0_h0|w0_h0|w0+w1_h0';
-                else stackLayout = '0_0'; // fallback
-                
-                finalStream = `[v_grid]`;
-                filterComplex += `${scaledStreams.join('')}xstack=inputs=${count}:layout=${stackLayout}${finalStream};`;
-                
-            } else {
-                finalStream = cameraStreamNames[0].name;
-            }
-            
-            // Timestamp
-            if (addTimestamp && fontFile) {
-                const stampedStream = `[v_final]`;
-                // Escape colons and special chars for filter string
-                // text='%{pts\:localtime\:1700000000}'
-                const drawText = `drawtext=fontfile=${fontFile}:text='%{pts\\:localtime\\:${startEpoch}}':x=w-text_w-20:y=20:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5`;
-                
-                filterComplex += `${finalStream}${drawText}${stampedStream}`;
-                finalStream = stampedStream;
-            }
-            
-            if (filterComplex.endsWith(';')) filterComplex = filterComplex.slice(0, -1);
-            
-            const args = [];
-            for (const cam of sortedCameras) {
-                if (!cameraInputs[cam]) continue;
-                for (const input of cameraInputs[cam]) {
-                    args.push('-i', input.filename);
+                // Add timestamp
+                if (addTimestamp && fontFile) {
+                    const stampedStream = `[v_final]`;
+                    const escapedTimestamp = segmentTimestampStr.replace(/:/g, '\\:');
+                    const drawText = `drawtext=fontfile=${fontFile}:text='${escapedTimestamp}':x=w-text_w-20:y=20:fontsize=48:fontcolor=white:box=1:boxcolor=black@0.5`;
+                    
+                    filterComplex += `${finalStream}${drawText}${stampedStream}`;
+                    finalStream = stampedStream;
                 }
+                
+                if (filterComplex.endsWith(';')) filterComplex = filterComplex.slice(0, -1);
+                
+                const args = [];
+                // Add inputs
+                for (const cam of sortedCameras) {
+                    if (cameraInputs[cam]) args.push('-i', cameraInputs[cam][0]);
+                }
+                
+                args.push('-filter_complex', filterComplex);
+                args.push('-map', finalStream);
+                
+                // Encoding settings
+                // Use MPEG-TS for intermediate segments
+                args.push('-c:v', 'libx264', '-preset', 'ultrafast');
+                // Cap bitrate to control file size and memory usage (4Mbps is sufficient for dashboard)
+                args.push('-b:v', '4000k', '-maxrate', '4000k', '-bufsize', '8000k');
+                args.push('-crf', '28'); // Slightly better quality than 32, but bitrate cap will control size
+                args.push('-g', '48', '-bf', '0', '-pix_fmt', 'yuv420p');
+                args.push('-f', 'mpegts'); // Output as TS
+                
+                const tempOutName = `temp_out_${i}.ts`;
+                args.push(tempOutName);
+                
+                console.log(`[FFmpeg] Processing segment ${i}`, args.join(' '));
+                await ffmpeg.exec(args);
+                
+                // Read temp file to JS memory
+                const segData = await ffmpeg.readFile(tempOutName);
+                
+                if (writable) {
+                     // Streaming write to disk directly
+                     progressCallback?.(`写入磁盘 (段 ${i + 1})...`);
+                     await writable.write(segData);
+                } else {
+                     // Convert to Blob immediately
+                     const segBlob = new Blob([segData.buffer], { type: 'video/mp2t' });
+                     tsBlobs.push(segBlob);
+                }
+                
+                // Clean up WASM memory
+                await ffmpeg.deleteFile(tempOutName);
+                
+                // CLEANUP INPUTS IMMEDIATELY
+                for (const f of segmentFiles) {
+                    await ffmpeg.deleteFile(f);
+                }
+                
+                // Explicitly nullify
+                data = null; 
             }
             
-            args.push('-filter_complex', filterComplex);
-            args.push('-map', finalStream);
+            if (writable) {
+                 await writable.close();
+                 this.ffmpegProgressCallback = null;
+                 // Return empty blob to satisfy signature, but with saved: true
+                 return new Blob([], { type: 'video/mp2t' });
+            }
             
-            args.push('-c:v', 'libx264');
-            args.push('-preset', 'ultrafast'); 
-            args.push('-f', 'mp4');
-            args.push('output.mp4');
+            // 3. Concat all segments (Memory Mode Fallback)
+            progressCallback?.('合并片段...');
             
-            console.log('FFmpeg WASM Command:', args.join(' '));
-            progressCallback?.('开始编码 (这可能需要几分钟)...');
-            
-            await ffmpeg.exec(args);
-            
-            progressCallback?.('读取输出文件...');
-            const data = await ffmpeg.readFile('output.mp4');
-            const blob = new Blob([data.buffer], { type: 'video/mp4' });
-            
-            // Cleanup
-            for (const f of createdFiles) await ffmpeg.deleteFile(f);
-            if (fontFile) await ffmpeg.deleteFile(fontFile);
-            await ffmpeg.deleteFile('output.mp4');
-            
-            return blob;
-            
+            try {
+                const allTsBlob = new Blob(tsBlobs, { type: 'video/mp2t' });
+                
+                // Only try to remux if small enough
+                const MAX_SAFE_SIZE = 500 * 1024 * 1024; // Lower limit to 500MB
+                if (allTsBlob.size > MAX_SAFE_SIZE) {
+                    console.warn('[FFmpeg] Total size too large, returning TS file');
+                    return allTsBlob;
+                }
+
+                const allTsBuffer = await allTsBlob.arrayBuffer();
+                const allTsUint8 = new Uint8Array(allTsBuffer);
+                
+                await ffmpeg.writeFile('all.ts', allTsUint8);
+                allCreatedFiles.push('all.ts');
+                
+                progressCallback?.('封装 MP4...');
+                const args = [
+                    '-i', 'all.ts',
+                    '-c', 'copy',
+                    '-movflags', '+faststart',
+                    'output.mp4'
+                ];
+                
+                await ffmpeg.exec(args);
+                const finalOutputData = await ffmpeg.readFile('output.mp4');
+                allCreatedFiles.push('output.mp4');
+                
+                const blob = new Blob([finalOutputData.buffer], { type: 'video/mp4' });
+                
+                // Final cleanup
+                for (const f of allCreatedFiles) {
+                    try { await ffmpeg.deleteFile(f); } catch {}
+                }
+                
+                this.ffmpegProgressCallback = null;
+                return blob;
+                
+            } catch (remuxError) {
+                console.warn('[FFmpeg] MP4 Remux failed, falling back to TS:', remuxError);
+                const finalBlob = new Blob(tsBlobs, { type: 'video/mp2t' });
+                for (const f of allCreatedFiles) {
+                    try { await ffmpeg.deleteFile(f); } catch {}
+                }
+                this.ffmpegProgressCallback = null;
+                return finalBlob; 
+            }
+
         } catch (e) {
             console.error('FFmpeg WASM Error:', e);
-            try {
-                for (const f of createdFiles) await ffmpeg.deleteFile(f);
-            } catch {}
+            if (writable) {
+                 try { await writable.close(); } catch {}
+            }
+            this.ffmpegProgressCallback = null;
+            // Attempt cleanup
+            for (const f of allCreatedFiles) {
+                try { await ffmpeg.deleteFile(f); } catch {}
+            }
             throw new Error('浏览器导出失败: ' + e.message + "\\n建议使用 Chrome 浏览器或尝试本地应用模式。");
         }
     }
@@ -2148,7 +2310,8 @@ class VideoClipProcessor {
         }
     }
 
-    async processClip(segments, cameras, startTime, endTime, addTimestamp, mergeGrid, eventStartTime, progressCallback, useLocalFFmpeg = false, language = 'zh') {
+
+    async processClip(segments, cameras, startTime, endTime, addTimestamp, mergeGrid, eventStartTime, progressCallback, useLocalFFmpeg = false, language = 'zh', fileHandle = null) {
         try {
             // Store language for use in processing methods
             this.currentLanguage = language;
@@ -2185,7 +2348,7 @@ class VideoClipProcessor {
                 }
             }
 
-            // 2. Fallback: Try native FFmpeg for fast copy (no timestamp, no grid)
+            // 2. Fallback: Try native FFmpeg for fast copy (no timestamp, no grid) - Tauri only
             const hasFFmpeg = await this.checkFFmpeg();
             if (hasFFmpeg && !addTimestamp && !mergeGrid) {
                  const results = [];
@@ -2197,6 +2360,72 @@ class VideoClipProcessor {
                  return results;
             }
             
+            // 3. Web FFmpeg (WASM) for Grid or Timestamp in Browser
+            // If we have fileHandle (streaming mode), force use Web FFmpeg logic even if cameras.length=1
+            // But currently processWithFFmpegWasm is only called if we implement it here.
+            // Wait, previous logic called createGridVideoFromSegments or processVideoWithTimestamp (Canvas).
+            // We want to replace Canvas with FFmpegWASM for better quality if possible, OR just optimize processWithFFmpegWasm
+            
+            // Previously, there was NO call to processWithFFmpegWasm in processClip in the provided snippet!
+            // Wait, let's check the original code again.
+            // Ah, the original code used Canvas (createGridVideoFromSegments / processVideoWithTimestamp).
+            // But I modified processWithFFmpegWasm earlier. Where is it called?
+            // It seems processWithFFmpegWasm was added but maybe not hooked up in processClip in the original code, 
+            // OR I missed where it was called.
+            
+            // Let's hook it up. If fileHandle is provided, OR if we want to use WASM instead of Canvas.
+            // Using WASM is generally better quality than Canvas recording but slower.
+            // If the user is on Web, we prefer WASM for Grid/Timestamp to avoid re-encoding loss of Canvas recording (which is real-time-ish).
+            
+            // However, to be safe and stick to the "fix memory" goal:
+            // If fileHandle is present, we MUST use processWithFFmpegWasm because Canvas recording doesn't support stream writing easily (MediaRecorder returns chunks, we could write chunks...).
+            // Actually MediaRecorder chunks CAN be written to fileHandle!
+            // But processWithFFmpegWasm was the one I optimized.
+            
+            // Let's use processWithFFmpegWasm if fileHandle is present OR if we want higher quality.
+            // For now, let's only enable it if fileHandle is present to test the fix.
+            
+            if (fileHandle) {
+                 progressCallback?.('正在使用流式导出模式 (Canvas)...');
+                 
+                 // 如果是合并四宫格
+                 if (mergeGrid && cameras.length > 1) {
+                     const result = await this.createGridVideoFromSegments(
+                        clipSegments,
+                        cameras,
+                        startTime,
+                        endTime,
+                        addTimestamp,
+                        eventStartTime,
+                        progressCallback,
+                        fileHandle
+                    );
+                    // result 可能是 Blob 或 { saved: true, blob: ... }
+                    const blob = result.saved ? result.blob : result;
+                    const saved = !!result.saved;
+                    return [{ camera: 'grid', blob: blob, saved: saved }];
+                 } else {
+                     // 单个摄像头处理
+                     const results = [];
+                     for (const camera of cameras) {
+                         const result = await this.processVideoWithTimestamp(
+                            clipSegments, 
+                            camera, 
+                            startTime, 
+                            endTime, 
+                            addTimestamp,
+                            eventStartTime,
+                            progressCallback,
+                            fileHandle
+                        );
+                        const blob = result.saved ? result.blob : result;
+                        const saved = !!result.saved;
+                        results.push({ camera, blob: blob, saved: saved });
+                     }
+                     return results;
+                 }
+            }
+
             // 3. If merging as grid, process all cameras together (Canvas method)
             if (mergeGrid && cameras.length > 1) {
                 progressCallback?.('合成四宫格视频...');
@@ -2212,7 +2441,7 @@ class VideoClipProcessor {
                 return [{ camera: 'grid', blob: gridBlob }];
             }
             
-            // 4. Otherwise, process each camera individually (Canvas method)
+            // 5. Otherwise, process each camera individually (Canvas method - fallback)
             const results = [];
             
             for (const camera of cameras) {
@@ -2595,28 +2824,153 @@ class VideoClipProcessor {
         return result;
     }
     
-    async processVideoWithTimestamp(clipSegments, camera, totalStartTime, totalEndTime, addTimestamp, eventStartTime, progressCallback) {
+    async processVideoWithTimestamp(clipSegments, camera, totalStartTime, totalEndTime, addTimestamp, eventStartTime, progressCallback, fileHandle = null) {
         if (clipSegments.length === 0) {
             throw new Error('没有可用的视频片段');
         }
         
         progressCallback?.(`处理 ${camera} 摄像头 (${clipSegments.length} 个片段)...`);
         
-        // Prepare all video elements for all segments
-        const videoElements = [];
-        let canvasWidth = 0;
-        let canvasHeight = 0;
-        
         // Check if we're in Tauri environment
         const isTauri = !!window.__TAURI__;
         
+        // First pass: get video dimensions from first segment (load and release immediately)
+        let canvasWidth = 0;
+        let canvasHeight = 0;
+        const firstVideoFile = clipSegments[0].segment.files[camera];
+        if (firstVideoFile) {
+            const tempVideo = document.createElement('video');
+            tempVideo.muted = true;
+            tempVideo.crossOrigin = 'anonymous';
+            tempVideo.src = getFileUrl(firstVideoFile);
+            await new Promise((resolve, reject) => {
+                tempVideo.onloadedmetadata = resolve;
+                tempVideo.onerror = reject;
+            });
+            canvasWidth = tempVideo.videoWidth;
+            canvasHeight = tempVideo.videoHeight;
+            // Release immediately
+            URL.revokeObjectURL(tempVideo.src);
+            tempVideo.src = '';
+            tempVideo.load();
+        }
+        
+        // Initialize canvas
+        this.initCanvas(canvasWidth, canvasHeight);
+        
+        // Calculate total duration
+        const FPS = 30;
+        let totalDuration = 0;
         for (const clipSegment of clipSegments) {
+            totalDuration += clipSegment.clipDuration;
+        }
+        const totalFrames = Math.ceil(totalDuration * FPS);
+        
+        // Setup MediaRecorder with fixed framerate
+        const stream = this.canvas.captureStream(FPS);
+        
+        // Try VP9 first, fallback to VP8 if not supported
+        let mimeType = 'video/webm;codecs=vp9';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/webm;codecs=vp8';
+        }
+        
+        this.mediaRecorder = new MediaRecorder(stream, {
+            mimeType,
+            videoBitsPerSecond: 3000000 // Reduced to 3 Mbps for lower memory footprint
+        });
+        
+        // Use streaming approach - write chunks to array and periodically clear
+        const chunks = [];
+        let totalChunkSize = 0;
+        let writable = null;
+        
+        // Write queue system
+        const writeQueue = [];
+        let isWriting = false;
+        
+        const processWriteQueue = async () => {
+            if (isWriting) return;
+            isWriting = true;
+            
+            while (writeQueue.length > 0) {
+                const blob = writeQueue.shift();
+                try {
+                    await writable.write(blob);
+                } catch (err) {
+                    console.error('Write error:', err);
+                }
+            }
+            
+            isWriting = false;
+        };
+        
+        if (fileHandle) {
+             try {
+                 writable = await fileHandle.createWritable();
+             } catch(e) {
+                 console.warn("Writable creation failed", e);
+             }
+        }
+        
+        this.mediaRecorder.ondataavailable = (e) => {
+            const size = e?.data ? e.data.size : 0;
+            if (size > 0) {
+                if (writable) {
+                    writeQueue.push(e.data);
+                    writeQueueSize += size;
+                    if (writeQueueSize > 50 * 1024 * 1024) {
+                        this.logMemory('writeQueue > 50MB', {
+                            writeQueueSize: this.formatBytes(writeQueueSize),
+                            totalChunkSize: this.formatBytes(totalChunkSize),
+                            chunksBuffered: chunks.length,
+                        });
+                    }
+                    processWriteQueue();
+                } else {
+                    chunks.push(e.data);
+                }
+                totalChunkSize += size;
+            }
+        };
+
+        
+        const recordingComplete = new Promise((resolve) => {
+            this.mediaRecorder.onstop = async () => {
+                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', totalChunkSize);
+                if (writable) {
+                     await writable.close();
+                     // Return result indicating saved
+                     resolve({ saved: true, blob: new Blob([], { type: 'video/webm' }) });
+                } else {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    console.log('Created blob, size:', blob.size);
+                    // Clear chunks array to free memory
+                    chunks.length = 0;
+                    resolve(blob);
+                }
+            };
+        });
+        
+        // Start recording - smaller timeslice helps reduce internal buffering
+        this.mediaRecorder.start(250);
+        const recordingStartTime = performance.now();
+        
+        // Process segments one at a time (streaming approach to reduce memory)
+        let processedFrames = 0;
+        const hasVideoFrameCallback = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+        
+        for (let i = 0; i < clipSegments.length; i++) {
+            const clipSegment = clipSegments[i];
             const videoFile = clipSegment.segment.files[camera];
             
             if (!videoFile) {
-                throw new Error(`${camera} 摄像头在某个片段中没有可用的视频文件`);
+                throw new Error(`${camera} 摄像头在片段 ${i + 1} 中没有可用的视频文件`);
             }
             
+            progressCallback?.(`加载片段 ${i + 1}/${clipSegments.length}...`);
+            
+            // Load video for this segment only
             const video = document.createElement('video');
             video.muted = true;
             video.crossOrigin = 'anonymous';
@@ -2641,73 +2995,7 @@ class VideoClipProcessor {
                 video.onerror = reject;
             });
             
-            if (canvasWidth === 0) {
-                canvasWidth = video.videoWidth;
-                canvasHeight = video.videoHeight;
-            }
-            
-            videoElements.push({
-                video,
-                clipSegment
-            });
-        }
-        
-        // Initialize canvas
-        this.initCanvas(canvasWidth, canvasHeight);
-        
-        // Calculate total duration
-        const FPS = 30;
-        let totalDuration = 0;
-        for (const { clipSegment } of videoElements) {
-            totalDuration += clipSegment.clipDuration;
-        }
-        const totalFrames = Math.ceil(totalDuration * FPS);
-        
-        // Setup MediaRecorder with fixed framerate
-        const stream = this.canvas.captureStream(FPS);
-        const chunks = [];
-        
-        // Try VP9 first, fallback to VP8 if not supported
-        let mimeType = 'video/webm;codecs=vp9';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm;codecs=vp8';
-        }
-        
-        this.mediaRecorder = new MediaRecorder(stream, {
-            mimeType,
-            videoBitsPerSecond: 5000000 // 5 Mbps
-        });
-        
-        this.mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-                chunks.push(e.data);
-            }
-        };
-        
-        const recordingComplete = new Promise((resolve) => {
-            this.mediaRecorder.onstop = () => {
-                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0));
-                const blob = new Blob(chunks, { type: 'video/webm' });
-                console.log('Created blob, size:', blob.size);
-                // Clear chunks array to free memory
-                chunks.length = 0;
-                resolve(blob);
-            };
-        });
-        
-        // Start recording
-        this.mediaRecorder.start(100);
-        const recordingStartTime = performance.now();
-        
-        // Process all segments using requestVideoFrameCallback for precise frame capture
-        let processedFrames = 0;
-        const hasVideoFrameCallback = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
-        
-        for (let i = 0; i < videoElements.length; i++) {
-            const { video, clipSegment } = videoElements[i];
-            
             // Calculate timestamp for this segment - extract full timestamp from filename
-            const videoFile = clipSegment.segment.files[camera];
             const fileName = videoFile?.name || (videoFile?.path ? videoFile.path.split(/[/\\]/).pop() : null);
             const fullTimestampMatch = fileName?.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
             
@@ -2719,12 +3007,10 @@ class VideoClipProcessor {
             }
             
             const segmentStartTimestamp = new Date(segmentTime.getTime() + clipSegment.clipStart * 1000);
-            const segmentEndTime = clipSegment.clipEnd; // Use clipEnd directly
-            
-            // Calculate actual end time (use video duration as upper bound)
+            const segmentEndTime = clipSegment.clipEnd;
             const actualEndTime = Math.min(segmentEndTime, video.duration);
             
-            console.log(`Processing single camera segment ${i + 1}/${videoElements.length}:`, {
+            console.log(`Processing single camera segment ${i + 1}/${clipSegments.length}:`, {
                 clipStart: clipSegment.clipStart,
                 clipEnd: clipSegment.clipEnd,
                 segmentEndTime,
@@ -2740,16 +3026,13 @@ class VideoClipProcessor {
             
             if (hasVideoFrameCallback) {
                 // Use requestVideoFrameCallback for precise frame capture
-                // This ensures we capture every frame the video produces
                 await new Promise((resolve) => {
                     let lastFrameTime = -1;
                     let resolved = false;
                     
                     const captureFrame = (now, metadata) => {
-                        // Prevent multiple resolves
                         if (resolved) return;
                         
-                        // Check if we've reached the end - add small buffer to ensure last frames are captured
                         if (video.currentTime >= actualEndTime + 0.05 || video.ended) {
                             resolved = true;
                             video.pause();
@@ -2757,14 +3040,11 @@ class VideoClipProcessor {
                             return;
                         }
                         
-                        // Only capture if this is a new frame
                         if (metadata.mediaTime !== lastFrameTime) {
                             lastFrameTime = metadata.mediaTime;
                             
-                            // Draw video frame
                             this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
                             
-                            // Draw timestamp if enabled
                             if (addTimestamp) {
                                 const currentTime = new Date(segmentStartTimestamp.getTime() + (video.currentTime - clipSegment.clipStart) * 1000);
                                 const timeString = currentTime.toLocaleString('zh-CN', {
@@ -2782,20 +3062,17 @@ class VideoClipProcessor {
                             
                             processedFrames++;
                             
-                            // Update progress every 30 frames
                             if (processedFrames % 30 === 0) {
                                 const progress = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
                                 progressCallback?.(`处理 ${camera}: ${progress}%`);
                             }
                         }
                         
-                        // Continue requesting frames only if not resolved
                         if (!resolved) {
                             video.requestVideoFrameCallback(captureFrame);
                         }
                     };
                     
-                    // Also listen for video ended event as a fallback
                     video.onended = () => {
                         if (!resolved) {
                             resolved = true;
@@ -2808,31 +3085,32 @@ class VideoClipProcessor {
                     video.play();
                 });
             } else {
-                // Fallback: Use setTimeout-based loop for consistent timing
-                // This is more reliable than requestAnimationFrame when the tab is in background
+                // Fallback: play and sample at FPS (avoid per-frame seeking which can explode memory)
+                const frameInterval = 1000 / FPS;
+                
                 await new Promise((resolve) => {
-                    const frameInterval = 1000 / FPS;
-                    let expectedTime = performance.now();
                     let resolved = false;
                     
-                    const processFrame = () => {
-                        // Prevent multiple resolves
+                    const stop = () => {
+                        if (resolved) return;
+                        resolved = true;
+                        video.pause();
+                        resolve();
+                    };
+                    
+                    const tick = () => {
                         if (resolved) return;
                         
-                        // Check if we've reached the end - add small buffer to ensure last frames are captured
-                        if (video.ended || video.currentTime >= actualEndTime + 0.05) {
-                            resolved = true;
-                            video.pause();
-                            resolve();
+                        const t = video.currentTime;
+                        if (t >= actualEndTime - 0.02 || video.ended) {
+                            stop();
                             return;
                         }
                         
-                        // Draw video frame
                         this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
                         
-                        // Draw timestamp if enabled
                         if (addTimestamp) {
-                            const currentTime = new Date(segmentStartTimestamp.getTime() + (video.currentTime - clipSegment.clipStart) * 1000);
+                            const currentTime = new Date(segmentStartTimestamp.getTime() + (t - clipSegment.clipStart) * 1000);
                             const timeString = currentTime.toLocaleString('zh-CN', {
                                 year: 'numeric',
                                 month: '2-digit',
@@ -2848,84 +3126,270 @@ class VideoClipProcessor {
                         
                         processedFrames++;
                         
-                        // Update progress every 30 frames
                         if (processedFrames % 30 === 0) {
                             const progress = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
                             progressCallback?.(`处理 ${camera}: ${progress}%`);
                         }
                         
-                        // Calculate next frame time with drift correction
-                        expectedTime += frameInterval;
-                        const drift = performance.now() - expectedTime;
-                        const nextDelay = Math.max(0, frameInterval - drift);
-                        
-                        if (!resolved) {
-                            setTimeout(processFrame, nextDelay);
-                        }
+                        setTimeout(tick, frameInterval);
                     };
                     
-                    // Also listen for video ended event as a fallback
-                    video.onended = () => {
-                        if (!resolved) {
-                            resolved = true;
-                            video.pause();
-                            resolve();
-                        }
-                    };
-                    
-                    video.play();
-                    setTimeout(processFrame, 0);
+                    video.play().then(() => tick()).catch(() => tick());
                 });
             }
-        }
-        
-        // Stop recording - add sufficient delay to ensure all frames are captured and encoded
-        // 500ms should be enough for the encoder to flush remaining frames
-        await new Promise(resolve => setTimeout(resolve, 500));
-        this.mediaRecorder.stop();
-        
-        const resultBlob = await recordingComplete;
-        
-        // Calculate actual duration based on real recording time
-        const recordingEndTime = performance.now();
-        const actualDuration = recordingEndTime - recordingStartTime;
-        console.log(`[Grid Export] Recording completed. Expected: ${totalDuration * 1000}ms, Actual: ${actualDuration}ms, Frames: ${processedFrames}`);
-        
-        // Fix WebM duration metadata
-        progressCallback?.('修复视频元数据...');
-        const fixedBlob = await webmDurationFixer.fixDuration(resultBlob, actualDuration);
-        
-        // Clean up video elements and blob URLs
-        for (const { video } of videoElements) {
+            
+            // Release video resources immediately after processing this segment
             video.pause();
             URL.revokeObjectURL(video.src);
             video.src = '';
-            video.load(); // 释放视频资源
+            video.load();
+            
+            // Allow GC
+            if (i % 5 === 0) {
+                 await new Promise(r => setTimeout(r, 100));
+            }
+
+            console.log(`Segment ${i + 1} completed, memory released`);
+            this.logMemory(`segment done ${i + 1}/${clipSegments.length}`, {
+                writeQueueSize: this.formatBytes(writeQueueSize),
+                totalChunkSize: this.formatBytes(totalChunkSize),
+                chunksBuffered: chunks.length,
+                writeQueueItems: writeQueue.length,
+            });
         }
-        videoElements.length = 0; // 清空数组引用
+
         
-        // 清理 canvas 和 stream
+        // Ensure all writes are finished before stopping
+        if (writable) {
+            while (isWriting || writeQueue.length > 0) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+        
+        // Stop recording
+        await new Promise(resolve => setTimeout(resolve, 500));
+        this.mediaRecorder.stop();
+        
+        const result = await recordingComplete;
+        
+        const calculatedDuration = (processedFrames / FPS) * 1000;
+        const recordingEndTime = performance.now();
+        const realTimeDuration = recordingEndTime - recordingStartTime;
+        console.log(`[Single Video Export] Recording completed. Expected: ${totalDuration * 1000}ms, Calculated: ${calculatedDuration}ms, RealTime: ${realTimeDuration}ms, Frames: ${processedFrames}`);
+        
+        // Clean up canvas and stream
         if (stream) {
             stream.getTracks().forEach(track => track.stop());
         }
         
+        if (result.saved) {
+             return result;
+        }
+
+        progressCallback?.('修复视频元数据...');
+        const fixedBlob = await webmDurationFixer.fixDuration(result, calculatedDuration);
+        
         return fixedBlob;
     }
     
-    async createGridVideoFromSegments(clipSegments, cameras, totalStartTime, totalEndTime, addTimestamp, eventStartTime, progressCallback) {
+    async createGridVideoFromSegments(clipSegments, cameras, totalStartTime, totalEndTime, addTimestamp, eventStartTime, progressCallback, fileHandle = null) {
         progressCallback?.(`准备四宫格视频 (${clipSegments.length} 个片段)...`);
-        
-        // Prepare video elements for all segments and all cameras
-        const allSegmentVideos = [];
-        let canvasWidth = 0;
-        let canvasHeight = 0;
         
         // Check if we're in Tauri environment
         const isTauri = !!window.__TAURI__;
         
+        // First pass: get video dimensions from first segment (load and release immediately)
+        let canvasWidth = 0;
+        let canvasHeight = 0;
+        const firstVideoFile = clipSegments[0].segment.files[cameras[0]];
+        if (firstVideoFile) {
+            const tempVideo = document.createElement('video');
+            tempVideo.muted = true;
+            tempVideo.crossOrigin = 'anonymous';
+            tempVideo.src = getFileUrl(firstVideoFile);
+            await new Promise((resolve, reject) => {
+                tempVideo.onloadedmetadata = resolve;
+                tempVideo.onerror = reject;
+            });
+            canvasWidth = tempVideo.videoWidth;
+            canvasHeight = tempVideo.videoHeight;
+            URL.revokeObjectURL(tempVideo.src);
+            tempVideo.src = '';
+            tempVideo.load();
+        }
+        
+        const videoCount = cameras.length;
+        
+        // Calculate grid layout and sort order
+        let gridCols, gridRows;
+        let sortOrder;
+
+        if (videoCount > 4) {
+            gridCols = 3; 
+            gridRows = 2;
+            sortOrder = ['left_pillar', 'front', 'right_pillar', 'left', 'back', 'right'];
+        } else {
+            sortOrder = ['front', 'back', 'left', 'right', 'left_pillar', 'right_pillar'];
+            if (videoCount === 1) {
+                gridCols = 1; gridRows = 1;
+            } else if (videoCount === 2) {
+                gridCols = 2; gridRows = 1;
+            } else {
+                gridCols = 2; gridRows = 2;
+            }
+        }
+
+        const sortedCameras = cameras.sort((a, b) => {
+            const idxA = sortOrder.indexOf(a);
+            const idxB = sortOrder.indexOf(b);
+            return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+        });
+
+        // Target output resolution: 1920x1080 (scales each cell to fit)
+        const targetWidth = 1920;
+        const targetHeight = 1080;
+        const cellWidth = Math.floor(targetWidth / gridCols);
+        const cellHeight = Math.floor(targetHeight / gridRows);
+        const gridCanvasWidth = targetWidth;
+        const gridCanvasHeight = targetHeight;
+        
+        // Initialize canvas
+        this.initCanvas(gridCanvasWidth, gridCanvasHeight);
+
+        
+        // Calculate total duration
+        const FPS = 30;
+        let totalDuration = 0;
         for (const clipSegment of clipSegments) {
-            const segmentVideos = {};
+            totalDuration += clipSegment.clipDuration;
+        }
+        const totalFrames = Math.ceil(totalDuration * FPS);
+        
+        // Setup MediaRecorder
+        const stream = this.canvas.captureStream(FPS);
+        
+        // Dynamic bitrate based on grid cell count
+        // Optimize bitrate to reduce memory usage: ~2.5Mbps per camera is sufficient
+        const gridCellCount = gridCols * gridRows;
+        const videoBitsPerSecond = Math.min(2500000 * gridCellCount, 15000000);
+        
+        let mimeType = 'video/webm;codecs=vp9';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/webm;codecs=vp8';
+        }
+        
+        console.log(`Grid export: ${gridCols}x${gridRows}, ${gridCanvasWidth}x${gridCanvasHeight}, ${videoBitsPerSecond / 1000000} Mbps, codec: ${mimeType}, total frames: ${totalFrames}`);
+        this.logMemory('grid init', {
+            gridSize: `${gridCols}x${gridRows}`,
+            canvasSize: `${gridCanvasWidth}x${gridCanvasHeight}`,
+            bitrateMbps: (videoBitsPerSecond / 1000000).toFixed(2),
+        });
+        
+        this.mediaRecorder = new MediaRecorder(stream, {
+            mimeType,
+            videoBitsPerSecond
+        });
+
+        
+        const chunks = [];
+        let totalChunkSize = 0;
+        let writable = null;
+        
+        // Write queue system to avoid Promise chain memory leaks
+        const writeQueue = [];
+        let writeQueueSize = 0;
+        let isWriting = false;
+        
+        const processWriteQueue = async () => {
+            if (isWriting) return;
+            isWriting = true;
             
+            while (writeQueue.length > 0) {
+                const blob = writeQueue.shift();
+                if (!blob) {
+                    continue;
+                }
+                writeQueueSize -= blob.size || 0;
+                try {
+                    await writable.write(blob);
+                } catch (err) {
+                    console.error('Write error:', err);
+                }
+            }
+            
+            isWriting = false;
+        };
+
+
+        if (fileHandle) {
+             try {
+                 writable = await fileHandle.createWritable();
+             } catch(e) {
+                 console.warn("Writable creation failed", e);
+             }
+        }
+        
+        this.mediaRecorder.ondataavailable = (e) => {
+            const size = e?.data ? e.data.size : 0;
+            if (size > 0) {
+                if (writable) {
+                    writeQueue.push(e.data);
+                    writeQueueSize += size;
+                    if (writeQueueSize > 50 * 1024 * 1024) {
+                        this.logMemory('writeQueue > 50MB', {
+                            writeQueueSize: this.formatBytes(writeQueueSize),
+                            totalChunkSize: this.formatBytes(totalChunkSize),
+                            chunksBuffered: chunks.length,
+                        });
+                    }
+                    processWriteQueue();
+                } else {
+                    chunks.push(e.data);
+                }
+                totalChunkSize += size;
+            }
+        };
+
+        
+        const recordingComplete = new Promise((resolve) => {
+            this.mediaRecorder.onstop = async () => {
+                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', totalChunkSize);
+                if (writable) {
+                     await writable.close();
+                     resolve({ saved: true, blob: new Blob([], { type: 'video/webm' }) });
+                } else {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    console.log('Created blob, size:', blob.size);
+                    chunks.length = 0;
+                    resolve(blob);
+                }
+            };
+        });
+        
+        // Start recording - smaller timeslice helps reduce internal buffering
+        this.mediaRecorder.start(250);
+        const recordingStartTime = performance.now();
+        
+        // Position mapping for grid
+        const cameraPositions = {};
+        sortedCameras.forEach((cam, index) => {
+            cameraPositions[cam] = {
+                x: index % gridCols,
+                y: Math.floor(index / gridCols)
+            };
+        });
+        
+        // Process segments one at a time (streaming approach)
+        let processedFrames = 0;
+        const hasVideoFrameCallback = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+        
+        for (let i = 0; i < clipSegments.length; i++) {
+            const clipSegment = clipSegments[i];
+            
+            progressCallback?.(`加载片段 ${i + 1}/${clipSegments.length}...`);
+            
+            // Load videos for this segment only
+            const videos = {};
             for (const camera of cameras) {
                 const videoFile = clipSegment.segment.files[camera];
                 if (!videoFile) continue;
@@ -2934,7 +3398,6 @@ class VideoClipProcessor {
                 video.muted = true;
                 video.crossOrigin = 'anonymous';
                 
-                // In Tauri, we need to read the file as blob to avoid CORS issues with canvas
                 if (isTauri && videoFile.path) {
                     try {
                         const fs = window.__TAURI__.fs;
@@ -2954,131 +3417,25 @@ class VideoClipProcessor {
                     video.onerror = reject;
                 });
                 
-                if (canvasWidth === 0) {
-                    canvasWidth = video.videoWidth;
-                    canvasHeight = video.videoHeight;
-                }
-                
-                segmentVideos[camera] = video;
+                videos[camera] = video;
             }
             
-            if (Object.keys(segmentVideos).length === 0) {
-                throw new Error('某个片段没有可用的视频文件');
+            if (Object.keys(videos).length === 0) {
+                throw new Error(`片段 ${i + 1} 没有可用的视频文件`);
             }
-            
-            allSegmentVideos.push({
-                videos: segmentVideos,
-                clipSegment
+
+            const videoCountLoaded = Object.keys(videos).length;
+            this.logMemory(`segment start ${i + 1}/${clipSegments.length}`, {
+                videoCountLoaded,
+                writeQueueSize: this.formatBytes(writeQueueSize),
+                totalChunkSize: this.formatBytes(totalChunkSize),
+                chunksBuffered: chunks.length,
+                writeQueueItems: writeQueue.length,
             });
-        }
-        
-        const videoCount = cameras.length;
-        
-        // Calculate grid layout and sort order
-        let gridCols, gridRows;
-        let sortOrder;
-
-        if (videoCount > 4) {
-            // 3x2 Grid for > 4 cameras
-            gridCols = 3; 
-            gridRows = 2;
-            // Visual layout: LP Front RP / Left Back Right
-            sortOrder = ['left_pillar', 'front', 'right_pillar', 'left', 'back', 'right'];
-        } else {
-            // Standard layout behavior for <= 4 cameras
-            sortOrder = ['front', 'back', 'left', 'right', 'left_pillar', 'right_pillar'];
-            if (videoCount === 1) {
-                gridCols = 1; gridRows = 1;
-            } else if (videoCount === 2) {
-                gridCols = 2; gridRows = 1;
-            } else {
-                gridCols = 2; gridRows = 2;
-            }
-        }
-
-        const sortedCameras = cameras.sort((a, b) => {
-            const idxA = sortOrder.indexOf(a);
-            const idxB = sortOrder.indexOf(b);
-            // Handle unknown cameras by putting them at the end
-            return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
-        });
-
-        const cellWidth = canvasWidth;
-        const cellHeight = canvasHeight;
-        const gridCanvasWidth = cellWidth * gridCols;
-        const gridCanvasHeight = cellHeight * gridRows;
-        
-        // Initialize canvas
-        this.initCanvas(gridCanvasWidth, gridCanvasHeight);
-        
-        // Calculate total duration
-        const FPS = 30;
-        let totalDuration = 0;
-        for (const { clipSegment } of allSegmentVideos) {
-            totalDuration += clipSegment.clipDuration;
-        }
-        const totalFrames = Math.ceil(totalDuration * FPS);
-        
-        // Setup MediaRecorder with fixed framerate
-        const stream = this.canvas.captureStream(FPS);
-        const chunks = [];
-        
-        // Dynamic bitrate based on grid cell count (5 Mbps per cell to match single video quality)
-        // Cap at 25 Mbps to avoid browser encoding issues
-        const gridCellCount = gridCols * gridRows;
-        const videoBitsPerSecond = Math.min(5000000 * gridCellCount, 25000000);
-        
-        // Try VP9 first, fallback to VP8 if not supported
-        let mimeType = 'video/webm;codecs=vp9';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm;codecs=vp8';
-        }
-        
-        console.log(`Grid export: ${gridCols}x${gridRows}, ${gridCanvasWidth}x${gridCanvasHeight}, ${videoBitsPerSecond / 1000000} Mbps, codec: ${mimeType}, total frames: ${totalFrames}`);
-        
-        this.mediaRecorder = new MediaRecorder(stream, {
-            mimeType,
-            videoBitsPerSecond
-        });
-        
-        this.mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-                chunks.push(e.data);
-            }
-        };
-        
-        const recordingComplete = new Promise((resolve) => {
-            this.mediaRecorder.onstop = () => {
-                console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0));
-                const blob = new Blob(chunks, { type: 'video/webm' });
-                console.log('Created blob, size:', blob.size);
-                // Clear chunks array to free memory
-                chunks.length = 0;
-                resolve(blob);
-            };
-        });
-        
-        // Start recording
-        this.mediaRecorder.start(100);
-        const recordingStartTime = performance.now();
-        
-        // Position mapping for grid
-        const cameraPositions = {};
-        sortedCameras.forEach((cam, index) => {
-            cameraPositions[cam] = {
-                x: index % gridCols,
-                y: Math.floor(index / gridCols)
-            };
-        });
-        
-        // Process all segments with real-time synchronized frame capture
-        let processedFrames = 0;
-        
-        for (let i = 0; i < allSegmentVideos.length; i++) {
-            const { videos, clipSegment } = allSegmentVideos[i];
             
-            // Calculate timestamp for this segment - extract full timestamp from filename
+            // Calculate timestamp for this segment
             const firstCam = sortedCameras[0];
+
             const videoFile = clipSegment.segment.files[firstCam];
             const fileName = videoFile?.name || (videoFile?.path ? videoFile.path.split(/[/\\]/).pop() : null);
             const fullTimestampMatch = fileName?.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
@@ -3091,14 +3448,12 @@ class VideoClipProcessor {
             }
             
             const segmentStartTimestamp = new Date(segmentTime.getTime() + clipSegment.clipStart * 1000);
-            const segmentEndTime = clipSegment.clipEnd; // Use clipEnd directly, not clipStart + clipDuration
+            const segmentEndTime = clipSegment.clipEnd;
             
-            // Get the first video as reference for timing
             const videoEntries = Object.entries(videos);
             const firstVideo = videoEntries[0][1];
             
-            // Log segment info for debugging
-            console.log(`Processing segment ${i + 1}/${allSegmentVideos.length}:`, {
+            console.log(`Processing segment ${i + 1}/${clipSegments.length}:`, {
                 clipStart: clipSegment.clipStart,
                 clipEnd: clipSegment.clipEnd,
                 clipDuration: clipSegment.clipDuration,
@@ -3109,72 +3464,61 @@ class VideoClipProcessor {
             // Seek all videos to clip start position
             for (const video of Object.values(videos)) {
                 video.currentTime = clipSegment.clipStart;
-                video.playbackRate = 1.0; // Ensure normal playback rate
+                video.playbackRate = 1.0;
             }
             await Promise.all(Object.values(videos).map(video => 
                 new Promise(resolve => { video.onseeked = resolve; })
             ));
             
-            // Use frame-by-frame capture with real-time synchronization
             const actualEndTime = Math.min(segmentEndTime, firstVideo.duration);
             const segmentDuration = actualEndTime - clipSegment.clipStart;
-            console.log(`Segment ${i + 1}: clipStart=${clipSegment.clipStart}, actualEndTime=${actualEndTime}, segmentDuration=${segmentDuration}s`);
+            const segmentFrameCount = Math.ceil(segmentDuration * FPS);
+            console.log(`Segment ${i + 1}: clipStart=${clipSegment.clipStart}, actualEndTime=${actualEndTime}, segmentDuration=${segmentDuration}s, expectedFrames=${segmentFrameCount}`);
             
-            await new Promise((resolve) => {
-                let resolved = false;
-                let lastCapturedTime = 0;
-                const segmentStartRealTime = performance.now();
-                const frameInterval = 1000 / FPS;
-                let frameCount = 0;
-                
-                const captureFrame = () => {
-                    if (resolved) return;
-                    
-                    const elapsedRealTime = performance.now() - segmentStartRealTime;
-                    const targetVideoTime = clipSegment.clipStart + (elapsedRealTime / 1000);
-                    
-                    // Check if we've reached the end - add small buffer (0.1s) to ensure last frames are captured
-                    if (targetVideoTime >= actualEndTime + 0.1 || firstVideo.ended) {
-                        console.log(`Segment ${i + 1} ended: elapsed=${elapsedRealTime}ms, targetTime=${targetVideoTime}, actualEndTime=${actualEndTime}, frames=${frameCount}`);
-                        resolved = true;
-                        for (const video of Object.values(videos)) {
-                            video.pause();
-                        }
-                        resolve();
-                        return;
-                    }
-                    
-                    // Clamp targetVideoTime to actualEndTime to avoid seeking past the end
-                    const clampedVideoTime = Math.min(targetVideoTime, actualEndTime);
-                    
-                    // Seek all videos to the target time for precise sync
-                    for (const video of Object.values(videos)) {
-                        if (Math.abs(video.currentTime - clampedVideoTime) > 0.05) {
-                            video.currentTime = clampedVideoTime;
-                        }
-                    }
-                    
-                    lastCapturedTime = firstVideo.currentTime;
-                    
-                    // Clear canvas
-                    this.ctx.fillStyle = '#000';
-                    this.ctx.fillRect(0, 0, gridCanvasWidth, gridCanvasHeight);
-                    
-                    // Draw each camera view
-                    for (const [camera, video] of videoEntries) {
-                        const pos = cameraPositions[camera] || { x: 0, y: 0 };
-                        const x = pos.x * cellWidth;
-                        const y = pos.y * cellHeight;
-                        
-                        this.ctx.drawImage(video, x, y, cellWidth, cellHeight);
-                        
-                        // Draw camera label
-                        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-                        this.ctx.fillRect(x + 10, y + 10, 150, 40);
-                        this.ctx.fillStyle = '#fff';
-                        this.ctx.font = 'bold 24px Arial';
-                        
-                        // Localize camera name
+        const renderFrame = (videoTime) => {
+            // Clear canvas
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0, 0, gridCanvasWidth, gridCanvasHeight);
+            
+            // 2x2 特殊逻辑：等比缩小、不裁剪；同一行的两张图水平拼成一组，整组居中，保证左右贴合无外部空隙
+            const is2x2 = gridCols === 2 && gridRows === 2;
+
+            if (is2x2) {
+                const layout = videoEntries.map(([camera, video]) => {
+                    const pos = cameraPositions[camera] || { x: 0, y: 0 };
+                    const x = pos.x * cellWidth;
+                    const y = pos.y * cellHeight;
+                    const srcW = video.videoWidth || cellWidth;
+                    const srcH = video.videoHeight || cellHeight;
+                    const scale = Math.min(cellWidth / srcW, cellHeight / srcH); // contain: 不裁剪
+                    const drawW = Math.ceil(srcW * scale);
+                    const drawH = Math.ceil(srcH * scale);
+                    return { camera, video, x, y, row: pos.y, drawW, drawH };
+                });
+
+                // 按行处理，每行两张：总宽度 <= 1920，整行居中；左右紧贴
+                const rows = new Map();
+                for (const item of layout) {
+                    if (!rows.has(item.row)) rows.set(item.row, []);
+                    rows.get(item.row).push(item);
+                }
+
+                for (const [, items] of rows) {
+                    items.sort((a, b) => a.x - b.x); // 左右顺序
+                    const totalW = items.reduce((sum, it) => sum + it.drawW, 0);
+                    const startX = Math.floor((gridCanvasWidth - totalW) / 2);
+                    let cursorX = startX;
+                    for (const item of items) {
+                        const offsetX = cursorX;
+                        const offsetY = item.y + Math.floor((cellHeight - item.drawH) / 2);
+                        this.ctx.drawImage(item.video, offsetX, offsetY, item.drawW, item.drawH);
+                        cursorX += item.drawW;
+
+                        // Draw camera label (auto width)
+                        const labelX = offsetX + 4;
+                        const labelY = item.y + 4;
+                        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                        this.ctx.font = 'bold 12px Arial';
                         const lang = this.currentLanguage || 'zh';
                         const cameraNames = {
                             front: { en: 'Front', zh: '前视' },
@@ -3184,90 +3528,281 @@ class VideoClipProcessor {
                             left: { en: 'Left', zh: '左侧' },
                             right: { en: 'Right', zh: '右侧' }
                         };
-                        const labelText = cameraNames[camera]?.[lang] || camera.toUpperCase();
-                        
-                        this.ctx.fillText(labelText, x + 20, y + 38);
-                    }
-                    
-                    // Draw timestamp if needed
-                    if (addTimestamp) {
-                        const currentTime = new Date(segmentStartTimestamp.getTime() + (targetVideoTime - clipSegment.clipStart) * 1000);
-                        const timeString = currentTime.toLocaleString('zh-CN', {
-                            year: 'numeric',
-                            month: '2-digit',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                            hour12: false
-                        }).replace(/\//g, '-');
-                        
-                        // Draw at top-right corner
-                        this.ctx.font = 'bold 48px Arial';
-                        const textWidth = this.ctx.measureText(timeString).width;
-                        const padding = 20;
-                        const boxWidth = textWidth + padding * 2;
-                        const boxHeight = 60;
-                        
-                        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                        this.ctx.fillRect(gridCanvasWidth - boxWidth - padding, padding, boxWidth, boxHeight);
+                        const labelText = cameraNames[item.camera]?.[lang] || item.camera.toUpperCase();
+                        const textW = this.ctx.measureText(labelText).width;
+                        const padX = 6;
+                        const padY = 4;
+                        const boxW = Math.ceil(textW + padX * 2);
+                        const boxH = 20 + padY * 0; // 20 高度够 12px 字体
+                        this.ctx.fillRect(labelX, labelY, boxW, boxH);
                         this.ctx.fillStyle = '#fff';
-                        this.ctx.textAlign = 'right';
-                        this.ctx.fillText(timeString, gridCanvasWidth - padding * 2, padding + 45);
-                        this.ctx.textAlign = 'left';
+                        this.ctx.fillText(labelText, labelX + padX, labelY + 14);
+
                     }
-                    
-                    frameCount++;
-                    processedFrames++;
-                    
-                    // Update progress every 30 frames
-                    if (processedFrames % 30 === 0) {
-                        const progress = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
-                        progressCallback?.(`处理四宫格: ${progress}%`);
-                    }
-                    
-                    // Schedule next frame at fixed interval for real-time sync
-                    if (!resolved) {
-                        setTimeout(captureFrame, frameInterval);
-                    }
-                };
+                }
+            } else {
+
+            // Draw each camera view (contain: keep aspect, center inside cell)
+            for (const [camera, video] of videoEntries) {
+                const pos = cameraPositions[camera] || { x: 0, y: 0 };
+                const x = pos.x * cellWidth;
+                const y = pos.y * cellHeight;
+
+                const srcW = video.videoWidth || cellWidth;
+                const srcH = video.videoHeight || cellHeight;
+                const scale = Math.min(cellWidth / srcW, cellHeight / srcH); // contain: 不裁剪
+                const drawW = Math.ceil(srcW * scale);
+                const drawH = Math.ceil(srcH * scale);
+
+                const offsetX = x + Math.floor((cellWidth - drawW) / 2);
+                const offsetY = y + Math.floor((cellHeight - drawH) / 2);
                 
-                // Start capturing
-                captureFrame();
-            });
-        }
-        
-        // Stop recording - add sufficient delay to ensure all frames are captured and encoded
-        // 500ms should be enough for the encoder to flush remaining frames
-        await new Promise(resolve => setTimeout(resolve, 500));
-        this.mediaRecorder.stop();
-        
-        const resultBlob = await recordingComplete;
-        
-        // Calculate actual duration based on real recording time
-        const recordingEndTime = performance.now();
-        const actualDuration = recordingEndTime - recordingStartTime;
-        console.log(`[Grid Export] Recording completed. Expected: ${totalDuration * 1000}ms, Actual: ${actualDuration}ms, Frames: ${processedFrames}`);
-        
-        // Fix WebM duration metadata
-        progressCallback?.('修复视频元数据...');
-        const fixedBlob = await webmDurationFixer.fixDuration(resultBlob, actualDuration);
-        
-        // Clean up video elements and blob URLs
-        for (const { videos } of allSegmentVideos) {
-            for (const video of Object.values(videos)) {
+                this.ctx.drawImage(video, offsetX, offsetY, drawW, drawH);
+
+                
+                // Draw camera label (auto width)
+                const labelX = x + 4;
+                const labelY = y + 4;
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                this.ctx.font = 'bold 12px Arial';
+                
+                const lang = this.currentLanguage || 'zh';
+                const cameraNames = {
+                    front: { en: 'Front', zh: '前视' },
+                    left_pillar: { en: 'Left Pillar', zh: '左柱' },
+                    right_pillar: { en: 'Right Pillar', zh: '右柱' },
+                    back: { en: 'Back', zh: '后视' },
+                    left: { en: 'Left', zh: '左侧' },
+                    right: { en: 'Right', zh: '右侧' }
+                };
+                const labelText = cameraNames[camera]?.[lang] || camera.toUpperCase();
+                const textW = this.ctx.measureText(labelText).width;
+                const padX = 6;
+                const padY = 4;
+                const boxW = Math.ceil(textW + padX * 2);
+                const boxH = 20 + padY * 0;
+                this.ctx.fillRect(labelX, labelY, boxW, boxH);
+                this.ctx.fillStyle = '#fff';
+                this.ctx.fillText(labelText, labelX + padX, labelY + 14);
+
+
+
+
+            }
+            }
+
+
+
+            
+            // Draw timestamp if needed
+            if (addTimestamp) {
+                const currentTime = new Date(segmentStartTimestamp.getTime() + (videoTime - clipSegment.clipStart) * 1000);
+                const timeString = currentTime.toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                }).replace(/\//g, '-');
+                
+                this.ctx.font = 'bold 20px Arial';
+                const textWidth = this.ctx.measureText(timeString).width;
+                const padding = 10;
+                const boxWidth = textWidth + padding * 2;
+                const boxHeight = 32;
+
+                // 放到右上角单元格的右上侧内边距位置
+                const topRightCell = videoEntries.reduce((acc, [cam]) => {
+                    const pos = cameraPositions[cam] || { x: 0, y: 0 };
+                    if (!acc) return { cam, pos };
+                    if (pos.x > acc.pos.x || (pos.x === acc.pos.x && pos.y < acc.pos.y)) {
+                        return { cam, pos };
+                    }
+                    return acc;
+                }, null);
+                const targetX = topRightCell ? topRightCell.pos.x * cellWidth : gridCanvasWidth - cellWidth;
+                const targetY = topRightCell ? topRightCell.pos.y * cellHeight : 0;
+                const margin = 16; // base inset
+                // 额外左移：按文本宽度的一半（n/2），让长时间戳整体更向内
+                const extraLeft = textWidth / 2;
+                const tsX = targetX + cellWidth - boxWidth - margin - extraLeft;
+                const tsY = targetY + margin;
+
+                
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                this.ctx.fillRect(tsX, tsY, boxWidth, boxHeight);
+                this.ctx.fillStyle = '#fff';
+                this.ctx.textAlign = 'right';
+                this.ctx.fillText(timeString, tsX + boxWidth - padding, tsY + 24);
+
+
+                this.ctx.textAlign = 'left';
+
+            }
+
+
+        };
+
+
+            
+            if (hasVideoFrameCallback) {
+                await new Promise((resolve) => {
+                    let resolved = false;
+                    const masterVideo = firstVideo;
+                    
+                    const stopAll = () => {
+                        if (resolved) return;
+                        resolved = true;
+                        for (const video of Object.values(videos)) {
+                            video.pause();
+                        }
+                        resolve();
+                    };
+                    
+                    const onFrame = () => {
+                        if (resolved) return;
+                        
+                        const t = masterVideo.currentTime;
+                        if (t >= actualEndTime - 0.02 || masterVideo.ended) {
+                            stopAll();
+                            return;
+                        }
+                        
+                        // Light sync: if other cameras drift too much, correct occasionally
+                        for (const video of Object.values(videos)) {
+                            if (video === masterVideo) continue;
+                            if (Math.abs(video.currentTime - t) > 0.15) {
+                                video.currentTime = t;
+                            }
+                        }
+                        
+                        renderFrame(t);
+                        processedFrames++;
+                        
+                        if (processedFrames % 30 === 0) {
+                            const progress = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
+                            progressCallback?.(`处理四宫格: ${progress}%`);
+                        }
+                        
+                        masterVideo.requestVideoFrameCallback(onFrame);
+                    };
+                    
+                    Promise.all(Object.values(videos).map(v => v.play().catch(() => null)))
+                        .then(() => {
+                            masterVideo.requestVideoFrameCallback(onFrame);
+                        });
+                });
+            } else {
+                // Fallback: play and sample at FPS without per-frame seeking
+                await new Promise((resolve) => {
+                    let resolved = false;
+                    const masterVideo = firstVideo;
+                    const frameInterval = 1000 / FPS;
+                    
+                    const stopAll = () => {
+                        if (resolved) return;
+                        resolved = true;
+                        for (const video of Object.values(videos)) {
+                            video.pause();
+                        }
+                        resolve();
+                    };
+                    
+                    const tick = () => {
+                        if (resolved) return;
+                        const t = masterVideo.currentTime;
+                        if (t >= actualEndTime - 0.02 || masterVideo.ended) {
+                            stopAll();
+                            return;
+                        }
+                        renderFrame(t);
+                        processedFrames++;
+                        
+                        if (processedFrames % 30 === 0) {
+                            const progress = Math.min(100, Math.round((processedFrames / totalFrames) * 100));
+                            progressCallback?.(`处理四宫格: ${progress}%`);
+                        }
+                        setTimeout(tick, frameInterval);
+                    };
+                    
+                    Promise.all(Object.values(videos).map(v => v.play().catch(() => null)))
+                        .then(() => {
+                            tick();
+                        });
+                });
+            }
+            
+            // Release video resources immediately after processing this segment
+            for (const key of Object.keys(videos)) {
+                const video = videos[key];
                 video.pause();
                 URL.revokeObjectURL(video.src);
                 video.src = '';
-                video.load(); // 释放视频资源
+                video.load(); // Detach source
+                videos[key] = null;
             }
+            
+            // Explicitly force garbage collection pause if processing many segments
+            if (i % 5 === 0) {
+                 await new Promise(r => setTimeout(r, 100));
+            }
+            
+            console.log(`Segment ${i + 1} completed, memory released`);
+            this.logMemory(`segment done ${i + 1}/${clipSegments.length}`, {
+                writeQueueSize: this.formatBytes(writeQueueSize),
+                totalChunkSize: this.formatBytes(totalChunkSize),
+                chunksBuffered: chunks.length,
+                writeQueueItems: writeQueue.length,
+            });
         }
-        allSegmentVideos.length = 0; // 清空数组引用
+
         
-        // 清理 canvas 和 stream
+        // Ensure all writes are finished before stopping
+        if (writable) {
+            // Wait for queue to drain
+            while (isWriting || writeQueue.length > 0) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+            this.logMemory('write queue drained', {
+                writeQueueSize: this.formatBytes(writeQueueSize),
+                totalChunkSize: this.formatBytes(totalChunkSize),
+                chunksBuffered: chunks.length,
+                writeQueueItems: writeQueue.length,
+            });
+        }
+
+
+        // Stop recording
+        await new Promise(resolve => setTimeout(resolve, 500));
+        this.mediaRecorder.stop();
+        
+        const result = await recordingComplete;
+        
+        const calculatedDuration = (processedFrames / FPS) * 1000;
+        const recordingEndTime = performance.now();
+        const realTimeDuration = recordingEndTime - recordingStartTime;
+        console.log(`[Grid Video Export] Recording completed. Expected: ${totalDuration * 1000}ms, Calculated: ${calculatedDuration}ms, RealTime: ${realTimeDuration}ms, Frames: ${processedFrames}`);
+        this.logMemory('recording stopped', {
+            writeQueueSize: this.formatBytes(writeQueueSize),
+            totalChunkSize: this.formatBytes(totalChunkSize),
+            chunksBuffered: chunks.length,
+            writeQueueItems: writeQueue.length,
+        });
+        
+        // Clean up canvas and stream
         if (stream) {
+
             stream.getTracks().forEach(track => track.stop());
         }
+        
+        if (result.saved) {
+             return result;
+        }
+
+        progressCallback?.('修复视频元数据...');
+        const fixedBlob = await webmDurationFixer.fixDuration(result, calculatedDuration);
         
         return fixedBlob;
     }
@@ -4972,6 +5507,31 @@ class TeslaCamViewer {
         
         console.log('[startClipExport] Export options:', { addTimestamp, mergeGrid, useLocalFFmpeg, cameras });
         
+        // WEB ONLY: Ask for save location upfront to enable streaming
+        let fileHandle = null;
+        if (!this.isTauri && 'showSaveFilePicker' in window && !useLocalFFmpeg) {
+             // Only support streaming for Grid (1 file) or Single Camera (1 file)
+             if (mergeGrid || cameras.length === 1) {
+                  try {
+                      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                      const camName = mergeGrid ? 'grid' : cameras[0];
+                      // Canvas export produces WebM
+                      const suggestedName = `TeslaCam_${camName}_${timestamp}.webm`;
+                      
+                      fileHandle = await window.showSaveFilePicker({
+                          suggestedName: suggestedName,
+                          types: [{
+                              description: 'WebM Video',
+                              accept: { 'video/webm': ['.webm'] }
+                          }],
+                      });
+                  } catch (e) {
+                      if (e.name === 'AbortError') return; // User cancelled
+                      console.error('File picker failed, falling back to memory mode:', e);
+                  }
+             }
+        }
+
         // Disable button and show progress
         this.dom.startClipBtn.disabled = true;
         this.dom.cancelClipBtn.disabled = true;
@@ -5017,7 +5577,7 @@ class TeslaCamViewer {
                         this.dom.clipProgressBar.classList.remove('indeterminate');
                         const percent = parseInt(percentMatch[1], 10);
                         this.dom.clipProgressBar.style.width = Math.min(95, percent) + '%';
-                    } else if (msg.includes('FFmpeg') || msg.includes('极速导出')) {
+                    } else if (msg.includes('FFmpeg') || msg.includes('极速导出') || msg.includes('写入磁盘')) {
                         // FFmpeg export - use indeterminate animation
                         this.dom.clipProgressBar.classList.add('indeterminate');
                     } else {
@@ -5030,7 +5590,8 @@ class TeslaCamViewer {
                     }
                 },
                 useLocalFFmpeg,
-                this.currentLanguage
+                this.currentLanguage,
+                fileHandle
             );
             
             this.dom.clipProgressBar.classList.remove('indeterminate');
@@ -5151,22 +5712,35 @@ class TeslaCamViewer {
                         
                         const btn = document.createElement('button');
                         btn.className = `download-btn${isGrid ? ' grid-btn' : ''}`;
-                        btn.innerHTML = `
-                            <span class="btn-icon">💾</span>
-                            <span class="btn-text">保存 ${cameraName} 视频</span>
-                            <span class="btn-size">${sizeText}</span>
-                        `;
-                        btn.onclick = async () => {
-                            await this.saveVideoFile(result.blob, filename);
-                            // Mark as downloaded
-                            result.downloaded = true;
-                            btn.disabled = true;
-                            btn.innerHTML = `
+                        
+                        if (result.saved) {
+                             btn.disabled = true;
+                             btn.innerHTML = `
                                 <span class="btn-icon">✅</span>
                                 <span class="btn-text">${cameraName} 已保存</span>
+                            `;
+                             if (result.blob && result.blob.size > 0) {
+                                 btn.innerHTML += `<span class="btn-size">${sizeText}</span>`;
+                             }
+                             this.dom.clipProgressText.textContent = translations.complete;
+                        } else {
+                            btn.innerHTML = `
+                                <span class="btn-icon">💾</span>
+                                <span class="btn-text">保存 ${cameraName} 视频</span>
                                 <span class="btn-size">${sizeText}</span>
                             `;
-                        };
+                            btn.onclick = async () => {
+                                await this.saveVideoFile(result.blob, filename);
+                                // Mark as downloaded
+                                result.downloaded = true;
+                                btn.disabled = true;
+                                btn.innerHTML = `
+                                    <span class="btn-icon">✅</span>
+                                    <span class="btn-text">${cameraName} 已保存</span>
+                                    <span class="btn-size">${sizeText}</span>
+                                `;
+                            };
+                        }
                         downloadButtons.appendChild(btn);
                     }
                 }
