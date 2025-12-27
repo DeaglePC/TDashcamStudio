@@ -1,11 +1,12 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
+  "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for TeslaCam Player",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:path:default",
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
@@ -39,8 +40,7 @@
         {
           "name": "ffmpeg",
           "cmd": "ffmpeg",
-          "args": true,
-          "sidecar": false
+          "args": true
         },
         {
           "name": "binaries/ffmpeg",
@@ -50,20 +50,17 @@
         {
           "name": "explorer",
           "cmd": "explorer",
-          "args": true,
-          "sidecar": false
+          "args": true
         },
         {
           "name": "open",
           "cmd": "open",
-          "args": true,
-          "sidecar": false
+          "args": true
         },
         {
           "name": "xdg-open",
           "cmd": "xdg-open",
-          "args": true,
-          "sidecar": false
+          "args": true
         }
       ]
     }

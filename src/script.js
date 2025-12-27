@@ -423,9 +423,11 @@ class VideoListComponent {
         
         let cityHtml = '';
         if (event.city && event.lat && event.lon) {
-            cityHtml = `<span class="city-link" data-lat="${event.lat}" data-lon="${event.lon}">${event.city}</span> `;
+            const locationText = event.street ? `${event.city} · ${event.street}` : event.city;
+            cityHtml = `<span class="city-link" data-lat="${event.lat}" data-lon="${event.lon}">${locationText}</span> `;
         } else if (event.city) {
-            cityHtml = `${event.city} `;
+            const locationText = event.street ? `${event.city} · ${event.street}` : event.city;
+            cityHtml = `${locationText} `;
         }
 
         const eventTypeLabel = this.getEventTypeLabel(event.eventType);
@@ -4266,11 +4268,19 @@ class TeslaCamViewer {
 
         try {
             const allFiles = [];
+            // 记录第一个有效的目录路径用于保存
+            let validDirPath = null;
+            
             for (const path of paths) {
                 console.log('[Tauri Drop] Scanning path:', path);
                 const files = await this.scanTauriFiles(path, path);
                 console.log('[Tauri Drop] Found files:', files.length);
                 allFiles.push(...files);
+                
+                // 记录第一个路径作为保存的目录
+                if (!validDirPath && files.length > 0) {
+                    validDirPath = path;
+                }
             }
 
             console.log('[Tauri Drop] Total files found:', allFiles.length);
@@ -4279,6 +4289,20 @@ class TeslaCamViewer {
                 allFiles.slice(0, 5).forEach(f => {
                     console.log('[Tauri Drop] Sample file:', f.name, 'webkitRelativePath:', f.webkitRelativePath);
                 });
+                
+                // 检查是否是有效的 TeslaCam 目录
+                const hasTeslaCamSubfolders = allFiles.some(file => 
+                    file.webkitRelativePath.includes('RecentClips/') ||
+                    file.webkitRelativePath.includes('SavedClips/') ||
+                    file.webkitRelativePath.includes('SentryClips/')
+                );
+                
+                if (hasTeslaCamSubfolders && validDirPath) {
+                    // 保存路径到配置文件，供下次启动使用
+                    await this.saveTauriConfig({ lastTeslaCamPath: validDirPath });
+                    console.log('[Tauri Drop] Saved path to config:', validDirPath);
+                }
+                
                 this.handleFolderSelection(allFiles);
             } else {
                 alert('No files found in the dropped folder.');
@@ -4421,16 +4445,22 @@ class TeslaCamViewer {
         }
 
         const jsonFiles = files.filter(f => f.name === 'event.json');
+        console.log('[processFiles] Found event.json files:', jsonFiles.length);
         for (const jsonFile of jsonFiles) {
             const eventId = jsonFile.webkitRelativePath.substring(0, jsonFile.webkitRelativePath.lastIndexOf('/'));
+            console.log('[processFiles] Processing event.json, eventId:', eventId, 'exists in map:', eventMap.has(eventId));
             if (eventMap.has(eventId)) {
                 try {
-                    const eventData = JSON.parse(await jsonFile.text());
+                    const textContent = await jsonFile.text();
+                    console.log('[processFiles] event.json content preview:', textContent.substring(0, 200));
+                    const eventData = JSON.parse(textContent);
                     const eventObj = eventMap.get(eventId);
                     eventObj.city = eventData.city;
+                    eventObj.street = eventData.street;
                     eventObj.eventTimestamp = eventData.timestamp;
                     eventObj.lat = eventData.est_lat;
                     eventObj.lon = eventData.est_lon;
+                    console.log('[processFiles] Parsed city:', eventObj.city, 'street:', eventObj.street);
                 } catch (e) {
                     console.error(`Error parsing event.json for ${eventId}:`, e);
                 }
@@ -4480,7 +4510,8 @@ class TeslaCamViewer {
 
         if (this.dom.headerLocationDisplay) {
             if (event.city && event.lat && event.lon) {
-                this.dom.headerLocationDisplay.innerHTML = `📍 <span class="city-text">${event.city}</span>`;
+                const locationText = event.street ? `${event.city} · ${event.street}` : event.city;
+                this.dom.headerLocationDisplay.innerHTML = `📍 <span class="city-text">${locationText}</span>`;
                 this.dom.headerLocationDisplay.onclick = () => this.showMapModal(event.lat, event.lon);
                 this.dom.headerLocationDisplay.style.display = 'block';
             } else {
@@ -4837,8 +4868,8 @@ class TeslaCamViewer {
             const entryPath = `${basePath}/${entry.name}`;
             
             if (entry.kind === 'file') {
-                // 只收集视频文件和缩略图
-                if (entry.name.endsWith('.mp4') || entry.name.endsWith('.png') || entry.name.endsWith('.jpg')) {
+                // 收集视频文件、缩略图和事件JSON
+                if (entry.name.endsWith('.mp4') || entry.name.endsWith('.png') || entry.name.endsWith('.jpg') || entry.name === 'event.json') {
                     try {
                         const file = await entry.getFile();
                         // 添加 webkitRelativePath 属性
