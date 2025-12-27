@@ -7,6 +7,10 @@ node_modules/
 src-tauri/target/
 src-tauri/gen/schemas/
 
+# FFmpeg binaries (large files, download via scripts/download-ffmpeg.*)
+src-tauri/binaries/ffmpeg-*
+!src-tauri/binaries/.gitkeep
+
 # Rust
 *.rs.bk
 Cargo.lock
