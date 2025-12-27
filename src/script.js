@@ -1729,6 +1729,40 @@ class VideoClipProcessor {
         this.recordingStartTime = null;
         this.ffmpeg = null;
     }
+    
+    // Clean up resources to prevent memory leaks
+    cleanup() {
+        console.log('[VideoClipProcessor] Cleaning up resources...');
+        
+        // Clear canvas
+        if (this.ctx && this.canvas) {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+        
+        // Reset canvas size to minimal to free GPU memory
+        if (this.canvas) {
+            this.canvas.width = 1;
+            this.canvas.height = 1;
+            this.canvas = null;
+        }
+        this.ctx = null;
+        
+        // Clear media recorder
+        if (this.mediaRecorder) {
+            if (this.mediaRecorder.state !== 'inactive') {
+                try {
+                    this.mediaRecorder.stop();
+                } catch (e) {
+                    // Ignore errors when stopping
+                }
+            }
+            this.mediaRecorder = null;
+        }
+        
+        this.recordingStartTime = null;
+        
+        console.log('[VideoClipProcessor] Cleanup completed');
+    }
 
     async loadFFmpeg(progressCallback) {
         if (this.ffmpeg && this.ffmpegLoaded) return this.ffmpeg;
@@ -2202,6 +2236,9 @@ class VideoClipProcessor {
         } catch (error) {
             console.error('Video processing error:', error);
             throw error;
+        } finally {
+            // Clean up canvas and media recorder resources
+            this.cleanup();
         }
     }
     
@@ -2652,6 +2689,8 @@ class VideoClipProcessor {
                 console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0));
                 const blob = new Blob(chunks, { type: 'video/webm' });
                 console.log('Created blob, size:', blob.size);
+                // Clear chunks array to free memory
+                chunks.length = 0;
                 resolve(blob);
             };
         });
@@ -2710,8 +2749,8 @@ class VideoClipProcessor {
                         // Prevent multiple resolves
                         if (resolved) return;
                         
-                        // Check if we've reached the end - use actualEndTime
-                        if (video.currentTime >= actualEndTime - 0.05 || video.ended) {
+                        // Check if we've reached the end - add small buffer to ensure last frames are captured
+                        if (video.currentTime >= actualEndTime + 0.05 || video.ended) {
                             resolved = true;
                             video.pause();
                             resolve();
@@ -2780,7 +2819,8 @@ class VideoClipProcessor {
                         // Prevent multiple resolves
                         if (resolved) return;
                         
-                        if (video.ended || video.currentTime >= actualEndTime - 0.05) {
+                        // Check if we've reached the end - add small buffer to ensure last frames are captured
+                        if (video.ended || video.currentTime >= actualEndTime + 0.05) {
                             resolved = true;
                             video.pause();
                             resolve();
@@ -2839,8 +2879,9 @@ class VideoClipProcessor {
             }
         }
         
-        // Stop recording - add a small delay to ensure all frames are captured
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Stop recording - add sufficient delay to ensure all frames are captured and encoded
+        // 500ms should be enough for the encoder to flush remaining frames
+        await new Promise(resolve => setTimeout(resolve, 500));
         this.mediaRecorder.stop();
         
         const resultBlob = await recordingComplete;
@@ -3011,11 +3052,12 @@ class VideoClipProcessor {
                 console.log('MediaRecorder stopped, chunks count:', chunks.length, 'total size:', chunks.reduce((acc, c) => acc + c.size, 0));
                 const blob = new Blob(chunks, { type: 'video/webm' });
                 console.log('Created blob, size:', blob.size);
+                // Clear chunks array to free memory
+                chunks.length = 0;
                 resolve(blob);
             };
         });
         
-        // Start recording
         // Start recording
         this.mediaRecorder.start(100);
         const recordingStartTime = performance.now();
@@ -3091,8 +3133,8 @@ class VideoClipProcessor {
                     const elapsedRealTime = performance.now() - segmentStartRealTime;
                     const targetVideoTime = clipSegment.clipStart + (elapsedRealTime / 1000);
                     
-                    // Check if we've reached the end
-                    if (targetVideoTime >= actualEndTime || firstVideo.ended) {
+                    // Check if we've reached the end - add small buffer (0.1s) to ensure last frames are captured
+                    if (targetVideoTime >= actualEndTime + 0.1 || firstVideo.ended) {
                         console.log(`Segment ${i + 1} ended: elapsed=${elapsedRealTime}ms, targetTime=${targetVideoTime}, actualEndTime=${actualEndTime}, frames=${frameCount}`);
                         resolved = true;
                         for (const video of Object.values(videos)) {
@@ -3102,10 +3144,13 @@ class VideoClipProcessor {
                         return;
                     }
                     
+                    // Clamp targetVideoTime to actualEndTime to avoid seeking past the end
+                    const clampedVideoTime = Math.min(targetVideoTime, actualEndTime);
+                    
                     // Seek all videos to the target time for precise sync
                     for (const video of Object.values(videos)) {
-                        if (Math.abs(video.currentTime - targetVideoTime) > 0.05) {
-                            video.currentTime = targetVideoTime;
+                        if (Math.abs(video.currentTime - clampedVideoTime) > 0.05) {
+                            video.currentTime = clampedVideoTime;
                         }
                     }
                     
@@ -3192,8 +3237,9 @@ class VideoClipProcessor {
             });
         }
         
-        // Stop recording - add a small delay to ensure all frames are captured
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Stop recording - add sufficient delay to ensure all frames are captured and encoded
+        // 500ms should be enough for the encoder to flush remaining frames
+        await new Promise(resolve => setTimeout(resolve, 500));
         this.mediaRecorder.stop();
         
         const resultBlob = await recordingComplete;
@@ -3287,6 +3333,8 @@ class TeslaCamViewer {
             // Clip modal elements
             clipModal: document.getElementById('clipModal'),
             clipModalTitle: document.getElementById('clipModalTitle'),
+            clipInfo: document.getElementById('clipInfo'),
+            clipOptions: document.getElementById('clipOptions'),
             clipDuration: document.getElementById('clipDuration'),
             clipStartTime: document.getElementById('clipStartTime'),
             clipEndTime: document.getElementById('clipEndTime'),
@@ -4786,6 +4834,11 @@ class TeslaCamViewer {
         this.dom.startClipBtn.style.display = 'block'; // Ensure visible
         this.dom.cancelClipBtn.disabled = false;
         this.dom.cancelClipBtn.textContent = i18n[this.currentLanguage].cancel; // Reset text
+        this.dom.cancelClipBtn.style.display = 'block'; // Ensure visible
+        
+        // Reset clip info and options state (remove disabled class)
+        this.dom.clipInfo.classList.remove('disabled');
+        this.dom.clipOptions.classList.remove('disabled');
         
         // Hide download buttons if any
         const downloadButtons = document.getElementById('downloadButtons');
@@ -4808,6 +4861,24 @@ class TeslaCamViewer {
             if (downloadButtons) {
                 downloadButtons.style.display = 'none';
                 downloadButtons.innerHTML = '';
+            }
+            
+            // Clean up pending export blobs to free memory
+            if (this.pendingExportBlobs) {
+                console.log('[Memory] Cleaning up pending export blobs...');
+                for (const result of this.pendingExportBlobs) {
+                    if (result.blob) {
+                        // Clear the blob reference
+                        result.blob = null;
+                    }
+                }
+                this.pendingExportBlobs = null;
+                
+                // Suggest garbage collection (browser will do this automatically, but this helps)
+                if (window.gc) {
+                    window.gc();
+                }
+                console.log('[Memory] Export blobs cleaned up');
             }
         }, 300);
     }
@@ -4904,6 +4975,8 @@ class TeslaCamViewer {
         // Disable button and show progress
         this.dom.startClipBtn.disabled = true;
         this.dom.cancelClipBtn.disabled = true;
+        this.dom.clipInfo.classList.add('disabled');
+        this.dom.clipOptions.classList.add('disabled');
         this.dom.clipProgress.style.display = 'block';
         this.dom.clipProgressBar.style.width = '0%';
         this.dom.clipProgressBar.classList.remove('indeterminate');
@@ -5058,6 +5131,13 @@ class TeslaCamViewer {
                 // Browser download - Show buttons
                 this.dom.clipProgressText.textContent = '视频已生成，请点击下方按钮保存';
                 
+                // Disable clip info and options since video is already generated
+                this.dom.clipInfo.classList.add('disabled');
+                this.dom.clipOptions.classList.add('disabled');
+                
+                // Store results for cleanup when modal closes
+                this.pendingExportBlobs = results;
+                
                 if (downloadButtons) {
                     downloadButtons.style.display = 'flex';
                     
@@ -5076,7 +5156,17 @@ class TeslaCamViewer {
                             <span class="btn-text">保存 ${cameraName} 视频</span>
                             <span class="btn-size">${sizeText}</span>
                         `;
-                        btn.onclick = () => this.saveVideoFile(result.blob, filename);
+                        btn.onclick = async () => {
+                            await this.saveVideoFile(result.blob, filename);
+                            // Mark as downloaded
+                            result.downloaded = true;
+                            btn.disabled = true;
+                            btn.innerHTML = `
+                                <span class="btn-icon">✅</span>
+                                <span class="btn-text">${cameraName} 已保存</span>
+                                <span class="btn-size">${sizeText}</span>
+                            `;
+                        };
                         downloadButtons.appendChild(btn);
                     }
                 }

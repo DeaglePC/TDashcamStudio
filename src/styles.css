@@ -1404,6 +1404,17 @@ body.sidebar-collapsed .open-sidebar-btn {
     margin-bottom: 16px;
 }
 
+.clip-options.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+    user-select: none;
+}
+
+.clip-info.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
 .clip-option-group {
     margin-bottom: 10px;
     padding: 12px;
