@@ -458,6 +458,36 @@ body.dark-theme #eventFilter {
     width: 100%;
 }
 
+.help-text .desktop-tip {
+    font-size: 0.9em;
+    color: var(--text-secondary);
+    margin-top: 15px;
+    padding: 12px 15px;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    border-radius: 8px;
+    border-left: 3px solid #667eea;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.help-text .desktop-link {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 0.85em;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.help-text .desktop-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
 .video-card {
     display: flex;
     flex-direction: column;
@@ -1696,6 +1726,82 @@ body.sidebar-collapsed .open-sidebar-btn {
 .clip-modal .close-modal-btn:hover {
     background: rgba(255, 255, 255, 0.2);
     transform: rotate(90deg);
+}
+
+/* File Path Modal Styles */
+.file-path-modal {
+    max-width: 560px;
+    width: 95%;
+    padding: 24px;
+    background: rgba(25, 25, 35, 0.95);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+}
+
+.file-path-modal h4 {
+    font-size: 1.1rem;
+    margin-bottom: 20px;
+    color: var(--text-primary);
+    text-align: center;
+}
+
+.file-path-container {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.file-path-input {
+    flex: 1;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-family: 'Consolas', 'Monaco', monospace;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.file-path-input:focus {
+    border-color: rgba(102, 126, 234, 0.6);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.copy-path-btn {
+    padding: 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.copy-path-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.copy-path-btn:active {
+    transform: translateY(0);
+}
+
+.copy-success-hint {
+    margin-top: 12px;
+    text-align: center;
+    color: #4ade80;
+    font-size: 0.85rem;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.copy-success-hint.show {
+    opacity: 1;
 }
 
 /* City Link Style */

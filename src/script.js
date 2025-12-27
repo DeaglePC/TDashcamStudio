@@ -20,12 +20,16 @@
         helpStep1IOS: "Copy TeslaCam videos to your iPad/iPhone",
         helpStep2IOS: "Select the video files (e.g., 2024-01-15_12-30-00-front.mp4)",
         helpNote: "Note: This tool does not upload your data. All operations are performed locally. (Gaode Maps may have inaccuracies due to limited WGS-84 support.)",
+        desktopTip: "💡 Tip: Due to browser limitations, it is recommended to use the desktop version for better performance.",
+        desktopDownload: "Download Desktop Version",
         mapModalTitle: "View on Map",
         gaodeMap: "Gaode Map",
         googleMap: "Google Map",
         revealFile: "Reveal File Path",
         downloadFile: "Download Current File",
         filePathAlertTitle: "Current Video File Path",
+        copiedToClipboard: "Copied to clipboard",
+        noFilePath: "Could not determine file path for the active camera.",
         selectDate: "Select Date",
         minutes: "minutes",
         preview: "Preview",
@@ -81,12 +85,16 @@
         helpStep1IOS: "将TeslaCam视频复制到iPad/iPhone",
         helpStep2IOS: "选择视频文件（如 2024-01-15_12-30-00-front.mp4）",
         helpNote: "注意：本工具不会上传你的数据，一切操作都是本地行为。（由于高德对WGS-84支持不够，所以高德地图有误差）",
+        desktopTip: "💡 提示：由于浏览器有诸多限制，建议使用桌面版获得更好的性能体验。",
+        desktopDownload: "下载桌面版",
         mapModalTitle: "在地图上查看",
         gaodeMap: "高德地图",
         googleMap: "谷歌地图",
         revealFile: "显示文件路径",
         downloadFile: "下载当前文件",
         filePathAlertTitle: "当前视频文件路径",
+        copiedToClipboard: "已复制到剪贴板",
+        noFilePath: "无法获取当前摄像头的文件路径",
         selectDate: "选择日期",
         minutes: "分钟",
         preview: "预览图",
@@ -228,6 +236,84 @@ function supportsDirectoryPicker() {
     const input = document.createElement('input');
     return 'webkitdirectory' in input && !isIOSDevice();
 }
+
+// Check if File System Access API is supported (for persistent directory handle)
+function supportsFileSystemAccess() {
+    return 'showDirectoryPicker' in window && !isIOSDevice();
+}
+
+// --- IndexedDB helpers for storing directory handle ---
+const DB_NAME = 'TeslaCamPlayerDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'directoryHandles';
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+            }
+        };
+    });
+}
+
+async function saveDirectoryHandle(handle) {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        await new Promise((resolve, reject) => {
+            const request = store.put({ id: 'lastDirectory', handle });
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+        db.close();
+        console.log('[IndexedDB] Directory handle saved');
+    } catch (e) {
+        console.warn('[IndexedDB] Failed to save directory handle:', e);
+    }
+}
+
+async function getDirectoryHandle() {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const result = await new Promise((resolve, reject) => {
+            const request = store.get('lastDirectory');
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+        db.close();
+        return result?.handle || null;
+    } catch (e) {
+        console.warn('[IndexedDB] Failed to get directory handle:', e);
+        return null;
+    }
+}
+
+async function clearDirectoryHandle() {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        await new Promise((resolve, reject) => {
+            const request = store.delete('lastDirectory');
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+        db.close();
+        console.log('[IndexedDB] Directory handle cleared');
+    } catch (e) {
+        console.warn('[IndexedDB] Failed to clear directory handle:', e);
+    }
+}
+// --- End IndexedDB helpers ---
+
 // --- End Device Detection ---
 
 // --- Coordinate Conversion Functions ---
@@ -3220,6 +3306,13 @@ class TeslaCamViewer {
             startClipBtn: document.getElementById('startClipBtn'),
             cancelClipBtn: document.getElementById('cancelClipBtn'),
             closeClipModalBtn: document.getElementById('closeClipModalBtn'),
+            // File path modal elements
+            filePathModal: document.getElementById('filePathModal'),
+            filePathModalTitle: document.getElementById('filePathModalTitle'),
+            filePathInput: document.getElementById('filePathInput'),
+            copyPathBtn: document.getElementById('copyPathBtn'),
+            copySuccessHint: document.getElementById('copySuccessHint'),
+            closeFilePathModalBtn: document.getElementById('closeFilePathModalBtn'),
         };
         this.videoListComponent = new VideoListComponent('fileList', (eventId) => this.playEvent(eventId), this);
         this.multiCameraPlayer = new MultiCameraPlayer();
@@ -3272,6 +3365,12 @@ class TeslaCamViewer {
             // Tauri 环境下使用 dialog API 选择目录
             if (this.isTauri) {
                 await this.selectTauriDirectory();
+                return;
+            }
+            
+            // 优先使用 File System Access API（支持持久化目录句柄）
+            if (supportsFileSystemAccess()) {
+                await this.selectDirectoryWithFSA();
                 return;
             }
             
@@ -3382,6 +3481,15 @@ class TeslaCamViewer {
         this.dom.clipModal.addEventListener('click', (e) => {
             if (e.target === this.dom.clipModal) {
                 this.hideClipModal();
+            }
+        });
+        
+        // File path modal listeners
+        this.dom.closeFilePathModalBtn.addEventListener('click', () => this.hideFilePathModal());
+        this.dom.copyPathBtn.addEventListener('click', () => this.copyFilePath());
+        this.dom.filePathModal.addEventListener('click', (e) => {
+            if (e.target === this.dom.filePathModal) {
+                this.hideFilePathModal();
             }
         });
     }
@@ -3872,6 +3980,14 @@ class TeslaCamViewer {
         const step1 = useFileInput ? translations.helpStep1IOS : translations.helpStep1;
         const step2 = useFileInput ? translations.helpStep2IOS : translations.helpStep2;
         
+        // Show desktop tip only in web environment (not in Tauri)
+        const desktopTipHtml = !this.isTauri ? `
+            <p class="desktop-tip">
+                ${translations.desktopTip}
+                <a href="https://github.com/DeaglePC/TeslaCamPlayer/releases" target="_blank" class="desktop-link">${translations.desktopDownload}</a>
+            </p>
+        ` : '';
+        
         const helpHtml = `
             <div class="empty-state help-text">
                 <ol>
@@ -3879,6 +3995,7 @@ class TeslaCamViewer {
                     <li>${step2}</li>
                 </ol>
                 <p class="note">${translations.helpNote}</p>
+                ${desktopTipHtml}
             </div>
         `;
         this.videoListComponent.container.innerHTML = helpHtml;
@@ -3916,49 +4033,245 @@ class TeslaCamViewer {
     }
 
     /**
+     * 获取 Tauri 配置文件路径
+     */
+    async getTauriConfigPath() {
+        const tauri = getTauri();
+        if (!tauri || !tauri.path) return null;
+        
+        try {
+            // 使用应用数据目录存储配置
+            const appDataDir = await tauri.path.appDataDir();
+            return `${appDataDir}config.json`;
+        } catch (e) {
+            console.warn('[getTauriConfigPath] Failed to get app data dir:', e);
+            return null;
+        }
+    }
+
+    /**
+     * 保存 Tauri 配置到本地文件
+     */
+    async saveTauriConfig(config) {
+        const tauri = getTauri();
+        if (!tauri || !tauri.fs) return;
+        
+        try {
+            const configPath = await this.getTauriConfigPath();
+            if (!configPath) return;
+            
+            // 确保目录存在
+            const appDataDir = await tauri.path.appDataDir();
+            try {
+                await tauri.fs.mkdir(appDataDir, { recursive: true });
+            } catch (e) {
+                // 目录可能已存在
+            }
+            
+            await tauri.fs.writeTextFile(configPath, JSON.stringify(config, null, 2));
+            console.log('[saveTauriConfig] Config saved to:', configPath);
+        } catch (e) {
+            console.warn('[saveTauriConfig] Failed to save config:', e);
+        }
+    }
+
+    /**
+     * 读取 Tauri 配置文件
+     */
+    async loadTauriConfig() {
+        const tauri = getTauri();
+        if (!tauri || !tauri.fs) return null;
+        
+        try {
+            const configPath = await this.getTauriConfigPath();
+            if (!configPath) return null;
+            
+            const content = await tauri.fs.readTextFile(configPath);
+            return JSON.parse(content);
+        } catch (e) {
+            // 文件不存在或解析失败
+            console.log('[loadTauriConfig] No config file found or parse error:', e.message);
+            return null;
+        }
+    }
+
+    /**
      * 加载上次选择的 TeslaCam 目录
      */
     async loadLastTeslaCamPath() {
-        const lastPath = localStorage.getItem('lastTeslaCamPath');
-        if (!lastPath) {
-            console.log('[loadLastTeslaCamPath] No saved path found');
-            return;
-        }
-        
-        console.log('[loadLastTeslaCamPath] Found saved path:', lastPath);
-        
-        // 等待 Tauri API 就绪
-        if (!this.isTauri) {
-            // 浏览器环境下无法自动加载本地路径
-            console.log('[loadLastTeslaCamPath] Not in Tauri environment, skipping auto-load');
-            return;
-        }
-        
-        // 等待一小段时间确保 Tauri API 完全初始化
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const tauri = getTauri();
-        if (!tauri || !tauri.fs) {
-            console.warn('[loadLastTeslaCamPath] Tauri fs API not available');
-            return;
-        }
-        
-        try {
-            // 检查目录是否仍然存在
-            const metadata = await tauri.fs.stat(lastPath);
-            if (!metadata.isDirectory) {
-                console.log('[loadLastTeslaCamPath] Path is not a directory');
-                localStorage.removeItem('lastTeslaCamPath');
+        // Tauri 环境：使用本地配置文件存储路径
+        if (this.isTauri) {
+            // 等待一小段时间确保 Tauri API 完全初始化
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            const tauri = getTauri();
+            if (!tauri || !tauri.fs) {
+                console.warn('[loadLastTeslaCamPath] Tauri fs API not available');
                 return;
             }
             
-            // 自动加载该目录
-            console.log('[loadLastTeslaCamPath] Auto-loading directory...');
-            await this.loadTauriDirectory(lastPath);
+            // 从配置文件读取上次的路径
+            const config = await this.loadTauriConfig();
+            const lastPath = config?.lastTeslaCamPath;
+            
+            if (!lastPath) {
+                console.log('[loadLastTeslaCamPath] No saved path found in config');
+                return;
+            }
+            
+            console.log('[loadLastTeslaCamPath] Found saved path:', lastPath);
+            
+            try {
+                // 检查目录是否仍然存在
+                const metadata = await tauri.fs.stat(lastPath);
+                if (!metadata.isDirectory) {
+                    console.log('[loadLastTeslaCamPath] Path is not a directory');
+                    return;
+                }
+                
+                // 自动加载该目录
+                console.log('[loadLastTeslaCamPath] Auto-loading directory...');
+                await this.loadTauriDirectory(lastPath);
+            } catch (e) {
+                console.warn('[loadLastTeslaCamPath] Failed to load saved path:', e);
+            }
+            return;
+        }
+        
+        // Web 环境：使用 File System Access API 和 IndexedDB 存储目录句柄
+        if (supportsFileSystemAccess()) {
+            try {
+                const handle = await getDirectoryHandle();
+                if (!handle) {
+                    console.log('[loadLastTeslaCamPath] No saved directory handle found');
+                    return;
+                }
+                
+                console.log('[loadLastTeslaCamPath] Found saved directory handle:', handle.name);
+                
+                // 请求权限（用户可能需要重新授权）
+                const permission = await handle.requestPermission({ mode: 'read' });
+                if (permission !== 'granted') {
+                    console.log('[loadLastTeslaCamPath] Permission denied, clearing saved handle');
+                    await clearDirectoryHandle();
+                    return;
+                }
+                
+                // 加载目录
+                console.log('[loadLastTeslaCamPath] Auto-loading directory from handle...');
+                await this.loadDirectoryFromHandle(handle);
+            } catch (e) {
+                console.warn('[loadLastTeslaCamPath] Failed to load saved directory handle:', e);
+                await clearDirectoryHandle();
+            }
+        } else {
+            console.log('[loadLastTeslaCamPath] File System Access API not supported');
+        }
+    }
+
+    /**
+     * 使用 File System Access API 选择目录（Web 版本）
+     */
+    async selectDirectoryWithFSA() {
+        try {
+            const handle = await window.showDirectoryPicker({
+                id: 'teslacam-directory',
+                mode: 'read',
+                startIn: 'documents'
+            });
+            
+            console.log('[selectDirectoryWithFSA] Selected directory:', handle.name);
+            
+            // 保存目录句柄到 IndexedDB
+            await saveDirectoryHandle(handle);
+            
+            // 加载目录
+            await this.loadDirectoryFromHandle(handle);
         } catch (e) {
-            console.warn('[loadLastTeslaCamPath] Failed to load saved path:', e);
-            // 路径不存在或无法访问，清除保存的路径
-            localStorage.removeItem('lastTeslaCamPath');
+            if (e.name === 'AbortError') {
+                console.log('[selectDirectoryWithFSA] User cancelled');
+                return;
+            }
+            console.error('[selectDirectoryWithFSA] Error:', e);
+            this.showToast('选择目录失败: ' + e.message, 'error');
+        }
+    }
+
+    /**
+     * 从目录句柄加载文件（Web 版本）
+     */
+    async loadDirectoryFromHandle(handle) {
+        // 显示加载状态
+        const loadingDiv = document.createElement('div');
+        loadingDiv.id = 'fsa-loading';
+        loadingDiv.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:white;padding:20px 40px;border-radius:8px;z-index:9999;';
+        loadingDiv.textContent = this.currentLanguage === 'zh' ? '正在加载目录...' : 'Loading directory...';
+        document.body.appendChild(loadingDiv);
+        
+        try {
+            const files = [];
+            await this.collectFilesFromHandle(handle, handle.name, files);
+            
+            console.log('[loadDirectoryFromHandle] Collected files:', files.length);
+            
+            if (files.length === 0) {
+                this.showToast(i18n[this.currentLanguage].invalidFolder, 'error');
+                await clearDirectoryHandle();
+                return;
+            }
+            
+            // 检查是否有 TeslaCam 子文件夹
+            const hasTeslaCamSubfolders = files.some(file => 
+                file.webkitRelativePath.includes('RecentClips/') ||
+                file.webkitRelativePath.includes('SavedClips/') ||
+                file.webkitRelativePath.includes('SentryClips/')
+            );
+            
+            if (!hasTeslaCamSubfolders) {
+                this.showToast(i18n[this.currentLanguage].invalidFolder, 'error');
+                await clearDirectoryHandle();
+                return;
+            }
+            
+            // 清理旧数据
+            this.cleanupOldData();
+            
+            this.allFiles = files;
+            this.eventGroups = await this.processFiles(this.allFiles);
+            console.log('[loadDirectoryFromHandle] eventGroups:', this.eventGroups.length);
+            this.filterAndRender();
+            
+        } finally {
+            loadingDiv.remove();
+        }
+    }
+
+    /**
+     * 递归收集目录中的所有文件
+     */
+    async collectFilesFromHandle(dirHandle, basePath, files) {
+        for await (const entry of dirHandle.values()) {
+            const entryPath = `${basePath}/${entry.name}`;
+            
+            if (entry.kind === 'file') {
+                // 只收集视频文件和缩略图
+                if (entry.name.endsWith('.mp4') || entry.name.endsWith('.png') || entry.name.endsWith('.jpg')) {
+                    try {
+                        const file = await entry.getFile();
+                        // 添加 webkitRelativePath 属性
+                        Object.defineProperty(file, 'webkitRelativePath', {
+                            value: entryPath,
+                            writable: false
+                        });
+                        files.push(file);
+                    } catch (e) {
+                        console.warn('[collectFilesFromHandle] Failed to get file:', entryPath, e);
+                    }
+                }
+            } else if (entry.kind === 'directory') {
+                // 递归处理子目录
+                await this.collectFilesFromHandle(entry, entryPath, files);
+            }
         }
     }
 
@@ -3971,7 +4284,8 @@ class TeslaCamViewer {
         
         try {
             // 获取上次选择的路径作为默认目录
-            const lastPath = localStorage.getItem('lastTeslaCamPath');
+            const config = await this.loadTauriConfig();
+            const lastPath = config?.lastTeslaCamPath;
             
             // 使用 Tauri dialog API 选择目录
             let dialog = tauri.dialog;
@@ -4045,9 +4359,9 @@ class TeslaCamViewer {
                 );
                 
                 if (hasTeslaCamSubfolders) {
-                    // 保存路径到 localStorage
-                    localStorage.setItem('lastTeslaCamPath', path);
-                    console.log('[loadTauriDirectory] Saved path to localStorage');
+                    // 保存路径到配置文件
+                    await this.saveTauriConfig({ lastTeslaCamPath: path });
+                    console.log('[loadTauriDirectory] Saved path to config file');
                     
                     await this.handleFolderSelection(files);
                 } else {
@@ -4193,7 +4507,7 @@ class TeslaCamViewer {
         }, { passive: false });
     }
 
-    revealCurrentFilePath() {
+    async revealCurrentFilePath() {
         if (this.multiCameraPlayer.isPlaying || !this.continuousPlayer.currentEvent) {
             return;
         }
@@ -4208,12 +4522,88 @@ class TeslaCamViewer {
         const activeCamera = this.multiCameraPlayer.activeCamera;
         const file = segment.files[activeCamera];
     
-        if (file && file.webkitRelativePath) {
-            const lang = this.currentLanguage;
-            const translations = i18n[lang];
-            alert(`${translations.filePathAlertTitle}:\n\n${file.webkitRelativePath}`);
+        // In Tauri desktop, open file explorer and select the file
+        if (this.isTauri && file && file.path) {
+            try {
+                const tauri = window.__TAURI__;
+                const shell = tauri.shell;
+                
+                // Detect OS and use appropriate command
+                const platform = navigator.platform.toLowerCase();
+                const isWindows = platform.includes('win');
+                const isMac = platform.includes('mac');
+                
+                if (isWindows) {
+                    // Windows: explorer /select,"path" - must be a single argument
+                    const normalizedPath = file.path.replace(/\//g, '\\');
+                    const command = shell.Command.create('explorer', [`/select,${normalizedPath}`]);
+                    await command.execute();
+                } else if (isMac) {
+                    // macOS: open -R "path"
+                    const command = shell.Command.create('open', ['-R', file.path]);
+                    await command.execute();
+                } else {
+                    // Linux: xdg-open parent directory (can't select file directly)
+                    const parentDir = file.path.substring(0, file.path.lastIndexOf('/'));
+                    const command = shell.Command.create('xdg-open', [parentDir]);
+                    await command.execute();
+                }
+                return;
+            } catch (e) {
+                console.error('Failed to reveal file in explorer:', e);
+                // Fall through to show modal with path
+            }
+        }
+        
+        // Fallback: show modal with file path for easy copying
+        // Prefer absolute path (file.path) if available, otherwise use webkitRelativePath
+        const displayPath = file?.path || file?.webkitRelativePath;
+        if (displayPath) {
+            this.showFilePathModal(displayPath);
         } else {
-            alert("Could not determine file path for the active camera.");
+            this.showToast(i18n[this.currentLanguage].noFilePath || "Could not determine file path for the active camera.", 'error');
+        }
+    }
+    
+    showFilePathModal(filePath) {
+        const translations = i18n[this.currentLanguage];
+        this.dom.filePathModalTitle.textContent = translations.filePathAlertTitle;
+        this.dom.filePathInput.value = filePath;
+        this.dom.copySuccessHint.classList.remove('show');
+        this.dom.filePathModal.style.display = 'flex';
+        requestAnimationFrame(() => {
+            this.dom.filePathModal.classList.add('show');
+        });
+        // Select the text for easy copying
+        this.dom.filePathInput.select();
+    }
+    
+    hideFilePathModal() {
+        this.dom.filePathModal.classList.remove('show');
+        setTimeout(() => {
+            this.dom.filePathModal.style.display = 'none';
+        }, 300);
+    }
+    
+    async copyFilePath() {
+        const filePath = this.dom.filePathInput.value;
+        const translations = i18n[this.currentLanguage];
+        try {
+            await navigator.clipboard.writeText(filePath);
+            this.dom.copySuccessHint.textContent = translations.copiedToClipboard;
+            this.dom.copySuccessHint.classList.add('show');
+            setTimeout(() => {
+                this.dom.copySuccessHint.classList.remove('show');
+            }, 2000);
+        } catch (e) {
+            // Fallback for older browsers
+            this.dom.filePathInput.select();
+            document.execCommand('copy');
+            this.dom.copySuccessHint.textContent = translations.copiedToClipboard;
+            this.dom.copySuccessHint.classList.add('show');
+            setTimeout(() => {
+                this.dom.copySuccessHint.classList.remove('show');
+            }, 2000);
         }
     }
 
