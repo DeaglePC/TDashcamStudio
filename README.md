@@ -46,6 +46,16 @@ A modern, browser-based viewer for your TeslaCam footage. Play all six camera an
 *   **Intuitive Icons**: Scissors icon (✂️) for clipping, checkmark (✓) for confirmation.
 *   **Progress Visualization**: Gradient progress bars with glowing effects during export.
 
+### 📊 Vehicle Metadata Parsing
+*   **Real-Time Driving Data**: Automatically parses SEI metadata embedded in video streams to display speed, gear, steering angle, and pedal positions.
+*   **Safety & Assistance**: Shows turn signal status and Autopilot (AP/FSD) activation state.
+*   **Dynamics & Location**: Displays GPS coordinates, heading, and 3-axis acceleration (X/Y/Z).
+*   **Interactive Dashboard**: The metadata panel can be dragged anywhere on the screen and toggled with a single click.
+*   **Official Reference**: Metadata parsing logic is based on the official [Tesla Dashcam](https://github.com/teslamotors/dashcam) repository.
+
+![Metadata Display 1](doc/images/screenshot1.webp)
+![Metadata Display 2](doc/images/screenshot2.webp)
+
 ### 🔍 Smart Features
 *   **Intuitive Filtering**: Easily filter recordings by date and event type (Recent, Saved, Sentry).
 *   **Map Integration**: Click on the event's city to view the location on Gaode Map or Google Maps.
