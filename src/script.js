@@ -62,7 +62,35 @@
         complete: "Complete!",
         selectClipRange: "Select clip range on progress bar first",
         selectAtLeastOneCamera: "Please select at least one camera",
-        exportFailed: "Export failed: "
+        exportFailed: "Export failed: ",
+        metadata: "Metadata",
+        loadingMetadata: "Loading...",
+        noMetadata: "No metadata found",
+        speed: "Speed",
+        gear: "Gear",
+        steering: "Steering",
+        accelerator: "Accelerator",
+        brake: "Brake",
+        brakeApplied: "Applied",
+        brakeNotApplied: "Not applied",
+        blinker: "Blinker",
+
+        autopilot: "Autopilot",
+        gps: "GPS",
+        heading: "Heading",
+        acceleration: "Acceleration",
+        gearPark: "Park",
+        gearDrive: "Drive",
+        gearReverse: "Reverse",
+        gearNeutral: "Neutral",
+        blinkerLeft: "Left",
+        blinkerRight: "Right",
+        blinkerBoth: "Both",
+        blinkerOff: "Off",
+        autopilotNone: "None",
+        autopilotSelfDriving: "FSD",
+        autopilotAutosteer: "Autosteer",
+        autopilotTACC: "TACC"
     },
     zh: {
         pageTitle: "TeslaCam 播放器",
@@ -130,7 +158,34 @@
         complete: "完成!",
         selectClipRange: "请先在进度条上选择剪辑范围",
         selectAtLeastOneCamera: "请至少选择一个摄像头",
-        exportFailed: "导出失败: "
+        exportFailed: "导出失败: ",
+        metadata: "元数据",
+        loadingMetadata: "加载中...",
+        noMetadata: "无元数据",
+        speed: "速度",
+        gear: "档位",
+        steering: "方向盘角度",
+        accelerator: "油门踏板",
+        brake: "刹车",
+        brakeApplied: "踩下",
+        brakeNotApplied: "未踩",
+        blinker: "转向灯",
+        autopilot: "自动驾驶",
+        gps: "GPS 坐标",
+        heading: "航向",
+        acceleration: "加速度",
+        gearPark: "驻车 (P)",
+        gearDrive: "前进 (D)",
+        gearReverse: "倒车 (R)",
+        gearNeutral: "空档 (N)",
+        blinkerLeft: "左",
+        blinkerRight: "右",
+        blinkerBoth: "双闪",
+        blinkerOff: "关",
+        autopilotNone: "无",
+        autopilotSelfDriving: "完全自动驾驶 (FSD)",
+        autopilotAutosteer: "自动辅助转向",
+        autopilotTACC: "自适应巡航"
     }
 };
 
@@ -221,6 +276,309 @@ class TauriFile {
     }
 }
 // --- End Tauri Helper ---
+
+class MetadataManager {
+    constructor(viewer) {
+        this.viewer = viewer;
+        this.protoRoot = null;
+        this.SeiMetadata = null;
+        this.currentMetadata = []; // Array of metadata objects for the current segment
+        this.isLoading = false;
+        
+        this.dom = {
+            panel: document.getElementById('metadataPanel'),
+            switchBtn: document.getElementById('metaSwitchBtn'),
+            loading: document.getElementById('metadataLoading'),
+            empty: document.getElementById('metadataEmpty'),
+            items: document.getElementById('metadataItems'),
+            values: {
+                speed: document.getElementById('metaSpeed'),
+                gear: document.getElementById('metaGear'),
+                steering: document.getElementById('metaSteering'),
+                accelerator: document.getElementById('metaAccelerator'),
+                brake: document.getElementById('metaBrake'),
+                blinker: document.getElementById('metaBlinker'),
+                autopilot: document.getElementById('metaAutopilot'),
+                gps: document.getElementById('metaGPS'),
+                heading: document.getElementById('metaHeading'),
+                acceleration: document.getElementById('metaAcceleration')
+            }
+        };
+        
+        this.initializeProtobuf();
+        this.bindEvents();
+    }
+    
+    async initializeProtobuf() {
+        try {
+            if (typeof protobuf === 'undefined') {
+                console.warn("[MetadataManager] protobuf.js not loaded yet, retrying in 1s");
+                setTimeout(() => this.initializeProtobuf(), 1000);
+                return;
+            }
+            this.protoRoot = await protobuf.load("dashcam.proto");
+            this.SeiMetadata = this.protoRoot.lookupType("SeiMetadata");
+            console.log("[MetadataManager] Protobuf initialized");
+        } catch (err) {
+            console.error("[MetadataManager] Failed to load protobuf:", err);
+        }
+    }
+    
+    bindEvents() {
+        // Toggle from header button
+        if (this.dom.switchBtn) {
+            this.dom.switchBtn.addEventListener('click', () => {
+                const isCollapsed = this.dom.panel.classList.contains('collapsed');
+                this.setCollapsed(!isCollapsed);
+            });
+        }
+
+        // Draggable logic
+        let isDragging = false;
+        let offsetX, offsetY;
+
+        this.dom.panel.addEventListener('mousedown', (e) => {
+            // Only drag if left click
+            if (e.button !== 0) return;
+            if (this.dom.panel.classList.contains('collapsed')) return;
+
+            isDragging = true;
+            this.dom.panel.classList.add('dragging');
+            
+            // Get the container's bounding box to calculate relative coordinates
+            const parentRect = this.dom.panel.parentElement.getBoundingClientRect();
+            const rect = this.dom.panel.getBoundingClientRect();
+            
+            // Calculate the offset of the mouse relative to the panel's top-left corner
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+
+            // Add global mouse listeners
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+            
+            e.preventDefault();
+        });
+
+        const onMouseMove = (e) => {
+            if (!isDragging) return;
+
+            const parentRect = this.dom.panel.parentElement.getBoundingClientRect();
+            
+            // Calculate new position relative to the parent container
+            let newLeft = e.clientX - parentRect.left - offsetX;
+            let newTop = e.clientY - parentRect.top - offsetY;
+
+            // Boundary checks
+            const panelRect = this.dom.panel.getBoundingClientRect();
+            newLeft = Math.max(0, Math.min(newLeft, parentRect.width - panelRect.width));
+            newTop = Math.max(0, Math.min(newTop, parentRect.height - panelRect.height));
+
+            this.dom.panel.style.left = `${newLeft}px`;
+            this.dom.panel.style.top = `${newTop}px`;
+            this.dom.panel.classList.add('is-moved');
+            this.dom.panel.style.transform = 'none'; 
+            this.dom.panel.style.margin = '0';
+        };
+
+        const onMouseUp = () => {
+            isDragging = false;
+            this.dom.panel.classList.remove('dragging');
+            this.dom.panel.style.transform = ''; // Allow CSS to handle scale/transitions
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+
+            // Convert to percentages for responsiveness
+            const parentRect = this.dom.panel.parentElement.getBoundingClientRect();
+            const panelRect = this.dom.panel.getBoundingClientRect();
+            
+            if (parentRect.width > 0 && parentRect.height > 0) {
+                const leftPct = ((panelRect.left - parentRect.left) / parentRect.width) * 100;
+                const topPct = ((panelRect.top - parentRect.top) / parentRect.height) * 100;
+                
+                this.dom.panel.style.left = `${leftPct}%`;
+                this.dom.panel.style.top = `${topPct}%`;
+            }
+        };
+
+        // Handle window resize to keep panel in bounds
+        window.addEventListener('resize', () => {
+            if (this.dom.panel.style.left && this.dom.panel.style.left.includes('%')) {
+                this.ensureInBounds();
+            }
+        });
+    }
+
+    ensureInBounds() {
+        const parentRect = this.dom.panel.parentElement.getBoundingClientRect();
+        const panelRect = this.dom.panel.getBoundingClientRect();
+        
+        if (panelRect.right > parentRect.right) {
+            const newLeft = Math.max(0, parentRect.width - panelRect.width);
+            this.dom.panel.style.left = `${(newLeft / parentRect.width) * 100}%`;
+        }
+        if (panelRect.bottom > parentRect.bottom) {
+            const newTop = Math.max(0, parentRect.height - panelRect.height);
+            this.dom.panel.style.top = `${(newTop / parentRect.height) * 100}%`;
+        }
+    }
+
+    setCollapsed(collapsed) {
+        if (collapsed) {
+            this.dom.panel.classList.add('collapsed');
+            if (this.dom.switchBtn) this.dom.switchBtn.classList.remove('active');
+        } else {
+            this.dom.panel.classList.remove('collapsed');
+            if (this.dom.switchBtn) this.dom.switchBtn.classList.add('active');
+        }
+    }
+    
+    async loadMetadata(file) {
+        if (!this.SeiMetadata) {
+            console.warn("[MetadataManager] Protobuf not ready, skipping metadata load");
+            return;
+        }
+        
+        this.isLoading = true;
+        this.updateUIStatus();
+        this.currentMetadata = [];
+        
+        try {
+            let buffer;
+            if (file instanceof File) {
+                buffer = await file.arrayBuffer();
+            } else if (file instanceof TauriFile) {
+                buffer = await file.arrayBuffer();
+            } else if (file && file.path) {
+                // If it's a file-like object but not instance of File/TauriFile
+                const response = await fetch(getFileUrl(file));
+                buffer = await response.arrayBuffer();
+            } else {
+                console.warn("[MetadataManager] Unknown file type for metadata loading");
+                return;
+            }
+
+            const parser = new DashcamMP4(buffer);
+            const rawMetadata = parser.parseMetadata();
+            
+            this.currentMetadata = rawMetadata.map(item => {
+                try {
+                    const decoded = this.SeiMetadata.decode(item.data);
+                    return {
+                        time: item.time,
+                        data: this.SeiMetadata.toObject(decoded, { enums: String, longs: String })
+                    };
+                } catch (e) {
+                    console.warn("[MetadataManager] Failed to decode SEI item:", e);
+                    return null;
+                }
+            }).filter(Boolean);
+            
+            console.log(`[MetadataManager] Loaded ${this.currentMetadata.length} metadata points`);
+            
+            // Auto expand panel if metadata is loaded
+            if (this.currentMetadata.length > 0 && this.dom.panel.classList.contains('collapsed')) {
+                this.setCollapsed(false);
+            }
+        } catch (err) {
+
+            console.error("[MetadataManager] Error parsing metadata:", err);
+            this.currentMetadata = [];
+        } finally {
+            this.isLoading = false;
+            this.updateUIStatus();
+        }
+    }
+    
+    updateUIStatus() {
+        if (!this.dom.loading) return;
+        this.dom.loading.style.display = this.isLoading ? 'block' : 'none';
+        this.dom.empty.style.display = (!this.isLoading && this.currentMetadata.length === 0) ? 'block' : 'none';
+        this.dom.items.style.display = (!this.isLoading && this.currentMetadata.length > 0) ? 'flex' : 'none';
+    }
+    
+    updateDisplay(currentTime) {
+        if (this.currentMetadata.length === 0) return;
+        
+        const lang = this.viewer.currentLanguage;
+        
+        // Find the metadata item closest to current playback time
+        let bestMatch = this.currentMetadata[0];
+        for (let i = 0; i < this.currentMetadata.length; i++) {
+            if (this.currentMetadata[i].time <= currentTime) {
+                bestMatch = this.currentMetadata[i];
+            } else {
+                break;
+            }
+        }
+        
+        if (!bestMatch || !bestMatch.data) return;
+        
+        const d = bestMatch.data;
+        const v = this.dom.values;
+        
+        // Update speed
+        const speedKmh = (d.vehicleSpeedMps || 0) * 3.6;
+        v.speed.textContent = `${speedKmh.toFixed(0)} km/h`;
+        
+        // Update gear
+        const gearMap = {
+            'GEAR_PARK': 'gearPark',
+            'GEAR_DRIVE': 'gearDrive',
+            'GEAR_REVERSE': 'gearReverse',
+            'GEAR_NEUTRAL': 'gearNeutral'
+        };
+        v.gear.textContent = i18n[lang][gearMap[d.gearState] || d.gearState] || d.gearState || '--';
+        
+        // Update steering
+        v.steering.textContent = `${(d.steeringWheelAngle || 0).toFixed(1)}°`;
+        
+        // Update accelerator
+        v.accelerator.textContent = `${(d.acceleratorPedalPosition || 0).toFixed(0)}%`;
+        
+        // Update brake
+        v.brake.textContent = d.brakeApplied ? i18n[lang].brakeApplied : i18n[lang].brakeNotApplied;
+        v.brake.style.color = d.brakeApplied ? '#ff4d4f' : '';
+
+        
+        // Update blinker
+        let blinkerText = i18n[lang].blinkerOff;
+        if (d.blinkerOnLeft && d.blinkerOnRight) blinkerText = i18n[lang].blinkerBoth;
+        else if (d.blinkerOnLeft) blinkerText = i18n[lang].blinkerLeft;
+        else if (d.blinkerOnRight) blinkerText = i18n[lang].blinkerRight;
+        v.blinker.textContent = blinkerText;
+        
+        // Update autopilot
+        const apMap = {
+            'NONE': 'autopilotNone',
+            'SELF_DRIVING': 'autopilotSelfDriving',
+            'AUTOSTEER': 'autopilotAutosteer',
+            'TACC': 'autopilotTACC'
+        };
+        v.autopilot.textContent = i18n[lang][apMap[d.autopilotState] || d.autopilotState] || d.autopilotState || '--';
+        v.autopilot.style.color = d.autopilotState !== 'NONE' ? '#1890ff' : '';
+        
+        // Update GPS
+        v.gps.textContent = (typeof d.latitudeDeg === 'number' && typeof d.longitudeDeg === 'number') 
+            ? `${d.latitudeDeg.toFixed(6)}, ${d.longitudeDeg.toFixed(6)}` 
+            : '--';
+        
+        // Update Heading
+        v.heading.textContent = (typeof d.headingDeg === 'number') ? `${d.headingDeg.toFixed(0)}°` : '--';
+        
+        // Update Acceleration
+        v.acceleration.textContent = (typeof d.linearAccelerationMps2X === 'number' && 
+                                     typeof d.linearAccelerationMps2Y === 'number' && 
+                                     typeof d.linearAccelerationMps2Z === 'number') 
+            ? `X:${d.linearAccelerationMps2X.toFixed(2)} Y:${d.linearAccelerationMps2Y.toFixed(2)} Z:${d.linearAccelerationMps2Z.toFixed(2)}` 
+            : '--';
+    }
+    
+    clear() {
+        this.currentMetadata = [];
+        this.updateUIStatus();
+    }
+}
 
 // --- Device Detection ---
 function isIOSDevice() {
@@ -686,7 +1044,15 @@ class MultiCameraPlayer {
         // Logic removed: User explicitly selects layout now.
         
         await this.waitForAllVideosLoaded();
+
+        // Load SEI metadata from front camera
+        if (segment.files['front'] && window.viewer && window.viewer.metadataManager) {
+            window.viewer.metadataManager.loadMetadata(segment.files['front']);
+        } else if (window.viewer && window.viewer.metadataManager) {
+            window.viewer.metadataManager.clear();
+        }
     }
+
 
     async waitForAllVideosLoaded() {
         const loadPromises = Object.values(this.players).filter(p => p.src).map(player =>
@@ -713,6 +1079,12 @@ class MultiCameraPlayer {
         const mainPlayer = this.players[this.activeCamera];
         if (!mainPlayer || !mainPlayer.src) return;
         const currentTime = mainPlayer.currentTime;
+
+        // Update metadata display
+        if (window.viewer && window.viewer.metadataManager) {
+            window.viewer.metadataManager.updateDisplay(currentTime);
+        }
+
         Object.keys(this.players).forEach(key => {
             if (key !== this.activeCamera && this.players[key] && this.players[key].src) {
                 const player = this.players[key];
@@ -3845,6 +4217,7 @@ class TeslaCamViewer {
         this.currentMapCoordinates = null;
         this.flatpickrInstance = null;
         this.videoClipProcessor = new VideoClipProcessor();
+        this.metadataManager = new MetadataManager(this);
         this.dom = {
             folderInput: document.getElementById('folderInput'),
             fileInputIOS: document.getElementById('fileInputIOS'),
@@ -5025,6 +5398,21 @@ class TeslaCamViewer {
         document.querySelectorAll('[data-i18n="right"]').forEach(el => el.textContent = translations.right);
         document.querySelectorAll('[data-i18n="leftPillar"]').forEach(el => el.textContent = translations.leftPillar);
         document.querySelectorAll('[data-i18n="rightPillar"]').forEach(el => el.textContent = translations.rightPillar);
+        document.querySelectorAll('[data-i18n="grid6"]').forEach(el => el.textContent = translations.grid6);
+        document.querySelectorAll('[data-i18n="grid4"]').forEach(el => el.textContent = translations.grid4);
+        document.querySelectorAll('[data-i18n="legacy"]').forEach(el => el.textContent = translations.legacy);
+
+        // Update Metadata Panel
+        const metadataKeys = [
+            'metadata', 'loadingMetadata', 'noMetadata', 'speed', 'gear', 'steering', 
+            'accelerator', 'brake', 'blinker', 'autopilot', 'gps', 'heading', 'acceleration'
+        ];
+        metadataKeys.forEach(key => {
+            document.querySelectorAll(`[data-i18n="${key}"]`).forEach(el => {
+                if (translations[key]) el.textContent = translations[key];
+            });
+        });
+
 
         if (this.allFiles.length === 0) {
             this.showInitialHelpMessage();
@@ -5324,6 +5712,21 @@ class TeslaCamViewer {
         document.querySelectorAll('[data-i18n="right"]').forEach(el => el.textContent = translations.right);
         document.querySelectorAll('[data-i18n="leftPillar"]').forEach(el => el.textContent = translations.leftPillar);
         document.querySelectorAll('[data-i18n="rightPillar"]').forEach(el => el.textContent = translations.rightPillar);
+        document.querySelectorAll('[data-i18n="grid6"]').forEach(el => el.textContent = translations.grid6);
+        document.querySelectorAll('[data-i18n="grid4"]').forEach(el => el.textContent = translations.grid4);
+        document.querySelectorAll('[data-i18n="legacy"]').forEach(el => el.textContent = translations.legacy);
+
+        // Update Metadata Panel
+        const metadataKeys = [
+            'metadata', 'loadingMetadata', 'noMetadata', 'speed', 'gear', 'steering', 
+            'accelerator', 'brake', 'blinker', 'autopilot', 'gps', 'heading', 'acceleration'
+        ];
+        metadataKeys.forEach(key => {
+            document.querySelectorAll(`[data-i18n="${key}"]`).forEach(el => {
+                if (translations[key]) el.textContent = translations[key];
+            });
+        });
+
         
         // Update clip info labels
         const clipDurationLabel = this.dom.clipDuration.previousElementSibling;

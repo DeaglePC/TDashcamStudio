@@ -62,6 +62,7 @@
                     <div id="realTimeClock" class="real-time-clock">--:--:--</div>
                 </div>
                 <div class="header-right">
+                    <button id="metaSwitchBtn" class="metadata-switch-btn" title="显示/隐藏元数据">📊</button>
                     <button id="revealFileBtn" class="control-btn" title="显示文件路径" disabled>📂</button>
                     <button id="downloadFileBtn" class="control-btn" title="下载当前文件" disabled>💾</button>
                     <button id="themeToggleBtn" class="control-btn theme-toggle-btn" title="切换主题"></button>
@@ -97,6 +98,64 @@
                 <div id="right-pillar-container" class="video-container is-pip hidden" data-camera="right_pillar">
                     <video id="right-pillar-player"></video>
                     <div class="camera-label">右柱</div>
+                </div>
+
+                <div id="metadataPanel" class="metadata-panel collapsed">
+                    <div class="metadata-content">
+                        <div class="metadata-header">
+                            <span data-i18n="metadata">元数据</span>
+                        </div>
+                        <div class="metadata-body" id="metadataBody">
+                            <div class="metadata-loading" id="metadataLoading" style="display: none;">
+                                <span data-i18n="loadingMetadata">加载中...</span>
+                            </div>
+                            <div class="metadata-empty" id="metadataEmpty">
+                                <span data-i18n="noMetadata">无元数据</span>
+                            </div>
+                            <div class="metadata-items" id="metadataItems" style="display: none;">
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="speed">速度</span>
+                                    <span class="metadata-value" id="metaSpeed">--</span>
+                                </div>
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="gear">档位</span>
+                                    <span class="metadata-value" id="metaGear">--</span>
+                                </div>
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="steering">方向盘</span>
+                                    <span class="metadata-value" id="metaSteering">--</span>
+                                </div>
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="accelerator">油门</span>
+                                    <span class="metadata-value" id="metaAccelerator">--</span>
+                                </div>
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="brake">刹车</span>
+                                    <span class="metadata-value" id="metaBrake">--</span>
+                                </div>
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="blinker">转向灯</span>
+                                    <span class="metadata-value" id="metaBlinker">--</span>
+                                </div>
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="autopilot">自动驾驶</span>
+                                    <span class="metadata-value" id="metaAutopilot">--</span>
+                                </div>
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="gps">GPS</span>
+                                    <span class="metadata-value" id="metaGPS">--</span>
+                                </div>
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="heading">航向</span>
+                                    <span class="metadata-value" id="metaHeading">--</span>
+                                </div>
+                                <div class="metadata-item">
+                                    <span class="metadata-label" data-i18n="acceleration">加速度</span>
+                                    <span class="metadata-value" id="metaAcceleration">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="videoControlsOverlay" class="video-controls-overlay">
@@ -281,6 +340,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/zh.js"></script>
+    <script src="vendor/protobuf.min.js"></script>
+    <script src="dashcam-mp4.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

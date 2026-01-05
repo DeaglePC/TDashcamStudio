@@ -158,12 +158,31 @@ body {
     margin-left: 8px;
 }
 
-#revealFileBtn {
-    font-size: 1.2rem;
-    margin-right: 4px;
-    position: relative;
-    top: -4px;
-    left: 2px;
+/* Metadata switch button (shown in header) */
+.metadata-switch-btn {
+    font-size: 1.1rem;
+    padding: 0;
+    line-height: 1;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+    color: var(--text-header);
+}
+
+.metadata-switch-btn:hover {
+    background-color: var(--bg-header-button-hover);
+}
+
+.metadata-switch-btn.active {
+    color: #007aff;
+    background-color: rgba(0, 122, 255, 0.1);
 }
 
 #revealFileBtn:disabled {
@@ -2240,6 +2259,115 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
 ::-webkit-scrollbar-corner {
     background: transparent;
 }
+
+/* Metadata Panel Styles */
+.metadata-panel {
+    position: absolute;
+    top: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: auto;
+    max-width: 90%;
+    background: rgba(15, 15, 15, 0.7);
+    backdrop-filter: blur(25px) saturate(180%);
+    -webkit-backdrop-filter: blur(25px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    color: #fff;
+    z-index: 100;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s, background 0.3s;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+    cursor: grab;
+    user-select: none;
+}
+
+.metadata-panel.dragging {
+    cursor: grabbing;
+    transition: opacity 0.3s, background 0.3s;
+    background: rgba(30, 30, 30, 0.8);
+    box-shadow: 0 15px 50px rgba(0, 0, 0, 0.8);
+}
+
+.metadata-panel.is-moved {
+    transform: none;
+}
+
+.metadata-panel.collapsed {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.95) translateX(-50%);
+}
+
+.metadata-panel.is-moved.collapsed {
+    transform: scale(0.95);
+}
+
+
+.metadata-content {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 6px 16px;
+    gap: 15px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none; /* Hide scrollbar for Firefox */
+}
+
+.metadata-content::-webkit-scrollbar {
+    display: none; /* Hide scrollbar for Chrome/Safari */
+}
+
+.metadata-header {
+    display: none; /* Hide header to save space */
+}
+
+.metadata-body {
+    display: flex;
+    align-items: center;
+}
+
+.metadata-items {
+    display: flex;
+    flex-direction: row;
+    gap: 18px;
+    align-items: center;
+}
+
+.metadata-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 2px 0;
+    white-space: nowrap;
+}
+
+.metadata-label {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.metadata-value {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #fff;
+    font-family: 'Segoe UI', 'Roboto', 'Inter', sans-serif;
+}
+
+.metadata-loading, .metadata-empty {
+    width: 100%;
+    text-align: center;
+    padding: 5px 20px;
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+    font-size: 0.85rem;
+}
+
 
 /* Toast Notification */
 .toast-container {
