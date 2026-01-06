@@ -119,19 +119,29 @@
                                     <div class="meta-left-col">
                                         <div class="meta-gear" id="metaGear">P</div>
                                         <div class="meta-brake-container">
-                                            <svg class="meta-brake-icon" id="metaBrakeIcon" viewBox="0 0 32 32" width="20" height="20">
-                                                <!-- Base gray pedal (always visible) -->
-                                                <rect x="8" y="4" width="16" height="24" rx="3" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>
-                                                <text x="16" y="20" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="10" font-weight="bold">B</text>
-                                                <!-- Active fill overlay - grows from bottom -->
-                                                <rect id="brakeFillRect" x="10" y="26" width="12" height="0" rx="2" fill="#ff6b6b" opacity="0"/>
+                                            <svg class="meta-brake-icon" id="metaBrakeIcon" viewBox="0 0 48 48" width="20" height="20">
+                                                <!-- Brake disc outer ring -->
+                                                <circle cx="24" cy="24" r="21" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>
+                                                <!-- Brake disc inner ring -->
+                                                <circle cx="24" cy="24" r="10" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>
+                                                <!-- Center dot -->
+                                                <circle cx="24" cy="24" r="3" fill="rgba(255,255,255,0.5)"/>
+                                                <!-- Brake caliper (C-shape on left) -->
+                                                <path d="M8 14 C2 18, 2 30, 8 34" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="3" stroke-linecap="round"/>
+                                                <!-- Active state elements (hidden by default) -->
+                                                <g id="brakeActiveGroup" opacity="0">
+                                                    <circle cx="24" cy="24" r="21" fill="none" stroke="#ff6b6b" stroke-width="2"/>
+                                                    <circle cx="24" cy="24" r="10" fill="none" stroke="#ff6b6b" stroke-width="2"/>
+                                                    <circle cx="24" cy="24" r="3" fill="#ff6b6b"/>
+                                                    <path d="M8 14 C2 18, 2 30, 8 34" fill="none" stroke="#ff6b6b" stroke-width="3" stroke-linecap="round"/>
+                                                </g>
                                             </svg>
                                         </div>
                                     </div>
                                     
                                     <!-- Left Blinker -->
                                     <div class="meta-blinker meta-blinker-left" id="metaBlinkerLeft">
-                                        <svg viewBox="0 0 24 24" width="16" height="16">
+                                        <svg viewBox="0 0 24 24" width="18" height="18">
                                             <path d="M14 6l-6 6 6 6V6z" fill="currentColor"/>
                                         </svg>
                                     </div>
@@ -144,7 +154,7 @@
                                     
                                     <!-- Right Blinker -->
                                     <div class="meta-blinker meta-blinker-right" id="metaBlinkerRight">
-                                        <svg viewBox="0 0 24 24" width="16" height="16">
+                                        <svg viewBox="0 0 24 24" width="18" height="18">
                                             <path d="M10 6l6 6-6 6V6z" fill="currentColor"/>
                                         </svg>
                                     </div>
@@ -152,7 +162,7 @@
                                     <!-- Right Column: Steering + Accelerator -->
                                     <div class="meta-right-col">
                                         <div class="meta-steering-container" id="metaSteeringContainer">
-                                            <svg class="meta-steering-icon" id="metaSteeringIcon" viewBox="0 0 64 64" width="16" height="16">
+                                            <svg class="meta-steering-icon" id="metaSteeringIcon" viewBox="0 0 64 64" width="18" height="18">
                                                 <!-- Outer ring -->
                                                 <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="5"/>
                                                 <!-- Inner hub circle -->
@@ -168,10 +178,11 @@
                                             <span class="meta-steering-value" id="metaSteering">0°</span>
                                         </div>
                                         <div class="meta-accelerator-container">
-                                            <svg class="meta-accelerator-icon" id="metaAcceleratorIcon" viewBox="0 0 32 32" width="20" height="20">
+                                            <svg class="meta-accelerator-icon" id="metaAcceleratorIcon" viewBox="0 0 32 32" width="22" height="22">
                                                 <!-- Base gray pedal (always visible) -->
                                                 <rect x="8" y="4" width="16" height="24" rx="3" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>
-                                                <text x="16" y="20" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="10" font-weight="bold">A</text>
+                                                <!-- Lightning bolt icon -->
+                                                <path d="M18 8 L13 16 L16 16 L14 24 L19 15 L16 15 L18 8 Z" fill="rgba(255,255,255,0.4)"/>
                                                 <!-- Active fill overlay - grows from bottom -->
                                                 <rect id="accelFillRect" x="10" y="26" width="12" height="0" rx="2" fill="#73d13d" opacity="0"/>
                                             </svg>

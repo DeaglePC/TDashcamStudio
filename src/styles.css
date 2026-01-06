@@ -2307,7 +2307,7 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 6px 12px;
+    padding: 7px 14px;
     gap: 4px;
     overflow-x: auto;
     overflow-y: hidden;
@@ -2342,7 +2342,7 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 7px;
     padding: 0;
 }
 
@@ -2353,17 +2353,17 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     align-items: center;
     justify-content: space-between;
     gap: 2px;
-    min-width: 24px;
-    height: 44px;
+    min-width: 26px;
+    height: 48px;
 }
 
 .meta-gear {
-    font-size: 1rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: rgba(255, 255, 255, 0.85);
     font-family: 'Segoe UI', 'Roboto', 'Inter', sans-serif;
     line-height: 1;
-    height: 18px;
+    height: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2373,7 +2373,7 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 22px;
+    height: 24px;
 }
 
 .meta-brake-icon {
@@ -2410,11 +2410,11 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-width: 50px;
+    min-width: 55px;
 }
 
 .meta-speed-value {
-    font-size: 1.8rem;
+    font-size: 2rem;
     font-weight: 300;
     color: rgba(255, 255, 255, 0.95);
     font-family: 'Segoe UI', 'Roboto', 'Inter', sans-serif;
@@ -2423,7 +2423,7 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
 }
 
 .meta-speed-unit {
-    font-size: 0.6rem;
+    font-size: 0.65rem;
     color: rgba(255, 255, 255, 0.6);
     font-weight: 400;
     margin-top: 1px;
@@ -2436,8 +2436,8 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     align-items: center;
     justify-content: space-between;
     gap: 2px;
-    min-width: 24px;
-    height: 44px;
+    min-width: 26px;
+    height: 48px;
 }
 
 .meta-steering-container {
@@ -2445,11 +2445,11 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 18px;
+    height: 20px;
 }
 
 .meta-steering-icon {
-    transition: transform 0.15s ease, filter 0.15s ease;
+    transition: transform 0.08s linear, filter 0.15s ease;
     opacity: 0.95;
 }
 
@@ -2461,7 +2461,7 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 22px;
+    height: 24px;
 }
 
 .meta-steering-icon.autopilot-active {

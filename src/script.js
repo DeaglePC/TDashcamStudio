@@ -300,7 +300,7 @@ class MetadataManager {
                 blinkerLeft: document.getElementById('metaBlinkerLeft'),
                 blinkerRight: document.getElementById('metaBlinkerRight'),
                 brakeIcon: document.getElementById('metaBrakeIcon'),
-                brakeFillRect: document.getElementById('brakeFillRect'),
+                brakeActiveGroup: document.getElementById('brakeActiveGroup'),
                 acceleratorIcon: document.getElementById('metaAcceleratorIcon'),
                 accelFillRect: document.getElementById('accelFillRect'),
                 autopilot: document.getElementById('metaAutopilot'),
@@ -562,15 +562,10 @@ class MetadataManager {
         }
         v.acceleratorIcon.classList.toggle('active', accelPercent > 5);
         
-        // Update brake - fill height when applied (grows from bottom, full height since only boolean)
+        // Update brake - show red active group when brake is applied
         const brakeApplied = d.brakeApplied || false;
-        if (v.brakeFillRect) {
-            const maxHeight = 20;
-            const fillHeight = brakeApplied ? maxHeight : 0;
-            const yPos = 26 - fillHeight;
-            v.brakeFillRect.setAttribute('y', yPos);
-            v.brakeFillRect.setAttribute('height', fillHeight);
-            v.brakeFillRect.setAttribute('opacity', brakeApplied ? 0.9 : 0);
+        if (v.brakeActiveGroup) {
+            v.brakeActiveGroup.setAttribute('opacity', brakeApplied ? 1 : 0);
         }
         v.brakeIcon.classList.toggle('active', brakeApplied);
         
