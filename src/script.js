@@ -295,9 +295,14 @@ class MetadataManager {
                 speed: document.getElementById('metaSpeed'),
                 gear: document.getElementById('metaGear'),
                 steering: document.getElementById('metaSteering'),
-                accelerator: document.getElementById('metaAccelerator'),
-                brake: document.getElementById('metaBrake'),
-                blinker: document.getElementById('metaBlinker'),
+                steeringIcon: document.getElementById('metaSteeringIcon'),
+                steeringContainer: document.getElementById('metaSteeringContainer'),
+                blinkerLeft: document.getElementById('metaBlinkerLeft'),
+                blinkerRight: document.getElementById('metaBlinkerRight'),
+                brakeIcon: document.getElementById('metaBrakeIcon'),
+                brakeFillRect: document.getElementById('brakeFillRect'),
+                acceleratorIcon: document.getElementById('metaAcceleratorIcon'),
+                accelFillRect: document.getElementById('accelFillRect'),
                 autopilot: document.getElementById('metaAutopilot'),
                 gps: document.getElementById('metaGPS'),
                 heading: document.getElementById('metaHeading'),
@@ -517,36 +522,61 @@ class MetadataManager {
         const d = bestMatch.data;
         const v = this.dom.values;
         
-        // Update speed
+        // Update speed (just the number, unit is separate)
         const speedKmh = (d.vehicleSpeedMps || 0) * 3.6;
-        v.speed.textContent = `${speedKmh.toFixed(0)} km/h`;
+        const speedDisplay = Math.round(speedKmh);
+        v.speed.textContent = speedDisplay === 0 ? '0' : speedDisplay;
         
-        // Update gear
-        const gearMap = {
-            'GEAR_PARK': 'gearPark',
-            'GEAR_DRIVE': 'gearDrive',
-            'GEAR_REVERSE': 'gearReverse',
-            'GEAR_NEUTRAL': 'gearNeutral'
+        // Update gear (single letter: P, D, R, N)
+        const gearLetterMap = {
+            'GEAR_PARK': 'P',
+            'GEAR_DRIVE': 'D',
+            'GEAR_REVERSE': 'R',
+            'GEAR_NEUTRAL': 'N'
         };
-        v.gear.textContent = i18n[lang][gearMap[d.gearState] || d.gearState] || d.gearState || '--';
+        v.gear.textContent = gearLetterMap[d.gearState] || '--';
         
-        // Update steering
-        v.steering.textContent = `${(d.steeringWheelAngle || 0).toFixed(1)}°`;
+        // Update steering wheel angle and rotation
+        const steeringAngle = d.steeringWheelAngle || 0;
+        v.steering.textContent = `${steeringAngle.toFixed(0)}°`;
+        // Rotate the steering wheel icon - allow full rotation (can exceed 360°)
+        v.steeringIcon.style.transform = `rotate(${steeringAngle}deg)`;
         
-        // Update accelerator
-        v.accelerator.textContent = `${(d.acceleratorPedalPosition || 0).toFixed(0)}%`;
+        // Update steering wheel color based on autopilot state
+        v.steeringIcon.classList.remove('autopilot-active', 'autopilot-self-driving');
+        if (d.autopilotState === 'SELF_DRIVING') {
+            v.steeringIcon.classList.add('autopilot-self-driving');
+        } else if (d.autopilotState === 'AUTOSTEER' || d.autopilotState === 'TACC') {
+            v.steeringIcon.classList.add('autopilot-active');
+        }
         
-        // Update brake
-        v.brake.textContent = d.brakeApplied ? i18n[lang].brakeApplied : i18n[lang].brakeNotApplied;
-        v.brake.style.color = d.brakeApplied ? '#ff4d4f' : '';
-
+        // Update accelerator pedal - fill height based on pedal position (grows from bottom)
+        const accelPercent = d.acceleratorPedalPosition || 0;
+        if (v.accelFillRect) {
+            const maxHeight = 20; // max fill height
+            const fillHeight = (accelPercent / 100) * maxHeight;
+            const yPos = 26 - fillHeight; // start from bottom (y=26) and grow upward
+            v.accelFillRect.setAttribute('y', yPos);
+            v.accelFillRect.setAttribute('height', fillHeight);
+            v.accelFillRect.setAttribute('opacity', accelPercent > 0 ? 0.9 : 0);
+        }
+        v.acceleratorIcon.classList.toggle('active', accelPercent > 5);
         
-        // Update blinker
-        let blinkerText = i18n[lang].blinkerOff;
-        if (d.blinkerOnLeft && d.blinkerOnRight) blinkerText = i18n[lang].blinkerBoth;
-        else if (d.blinkerOnLeft) blinkerText = i18n[lang].blinkerLeft;
-        else if (d.blinkerOnRight) blinkerText = i18n[lang].blinkerRight;
-        v.blinker.textContent = blinkerText;
+        // Update brake - fill height when applied (grows from bottom, full height since only boolean)
+        const brakeApplied = d.brakeApplied || false;
+        if (v.brakeFillRect) {
+            const maxHeight = 20;
+            const fillHeight = brakeApplied ? maxHeight : 0;
+            const yPos = 26 - fillHeight;
+            v.brakeFillRect.setAttribute('y', yPos);
+            v.brakeFillRect.setAttribute('height', fillHeight);
+            v.brakeFillRect.setAttribute('opacity', brakeApplied ? 0.9 : 0);
+        }
+        v.brakeIcon.classList.toggle('active', brakeApplied);
+        
+        // Update blinkers
+        v.blinkerLeft.classList.toggle('active', d.blinkerOnLeft || false);
+        v.blinkerRight.classList.toggle('active', d.blinkerOnRight || false);
         
         // Update autopilot
         const apMap = {

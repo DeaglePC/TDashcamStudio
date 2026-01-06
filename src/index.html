@@ -113,45 +113,90 @@
                                 <span data-i18n="noMetadata">无元数据</span>
                             </div>
                             <div class="metadata-items" id="metadataItems" style="display: none;">
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="speed">速度</span>
-                                    <span class="metadata-value" id="metaSpeed">--</span>
+                                <!-- Main Dashboard Row -->
+                                <div class="metadata-dashboard">
+                                    <!-- Left Column: Gear + Brake -->
+                                    <div class="meta-left-col">
+                                        <div class="meta-gear" id="metaGear">P</div>
+                                        <div class="meta-brake-container">
+                                            <svg class="meta-brake-icon" id="metaBrakeIcon" viewBox="0 0 32 32" width="20" height="20">
+                                                <!-- Base gray pedal (always visible) -->
+                                                <rect x="8" y="4" width="16" height="24" rx="3" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>
+                                                <text x="16" y="20" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="10" font-weight="bold">B</text>
+                                                <!-- Active fill overlay - grows from bottom -->
+                                                <rect id="brakeFillRect" x="10" y="26" width="12" height="0" rx="2" fill="#ff6b6b" opacity="0"/>
+                                            </svg>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Left Blinker -->
+                                    <div class="meta-blinker meta-blinker-left" id="metaBlinkerLeft">
+                                        <svg viewBox="0 0 24 24" width="16" height="16">
+                                            <path d="M14 6l-6 6 6 6V6z" fill="currentColor"/>
+                                        </svg>
+                                    </div>
+                                    
+                                    <!-- Center: Speed -->
+                                    <div class="meta-speed-container">
+                                        <span class="meta-speed-value" id="metaSpeed">0</span>
+                                        <span class="meta-speed-unit">km/h</span>
+                                    </div>
+                                    
+                                    <!-- Right Blinker -->
+                                    <div class="meta-blinker meta-blinker-right" id="metaBlinkerRight">
+                                        <svg viewBox="0 0 24 24" width="16" height="16">
+                                            <path d="M10 6l6 6-6 6V6z" fill="currentColor"/>
+                                        </svg>
+                                    </div>
+                                    
+                                    <!-- Right Column: Steering + Accelerator -->
+                                    <div class="meta-right-col">
+                                        <div class="meta-steering-container" id="metaSteeringContainer">
+                                            <svg class="meta-steering-icon" id="metaSteeringIcon" viewBox="0 0 64 64" width="16" height="16">
+                                                <!-- Outer ring -->
+                                                <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="5"/>
+                                                <!-- Inner hub circle -->
+                                                <circle cx="32" cy="32" r="9" fill="rgba(255,255,255,0.9)"/>
+                                                <!-- Three spokes -->
+                                                <!-- Left spoke -->
+                                                <rect x="4" y="28" width="19" height="8" rx="2" fill="rgba(255,255,255,0.9)"/>
+                                                <!-- Right spoke -->
+                                                <rect x="41" y="28" width="19" height="8" rx="2" fill="rgba(255,255,255,0.9)"/>
+                                                <!-- Bottom spoke -->
+                                                <rect x="28" y="41" width="8" height="19" rx="2" fill="rgba(255,255,255,0.9)"/>
+                                            </svg>
+                                            <span class="meta-steering-value" id="metaSteering">0°</span>
+                                        </div>
+                                        <div class="meta-accelerator-container">
+                                            <svg class="meta-accelerator-icon" id="metaAcceleratorIcon" viewBox="0 0 32 32" width="20" height="20">
+                                                <!-- Base gray pedal (always visible) -->
+                                                <rect x="8" y="4" width="16" height="24" rx="3" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>
+                                                <text x="16" y="20" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="10" font-weight="bold">A</text>
+                                                <!-- Active fill overlay - grows from bottom -->
+                                                <rect id="accelFillRect" x="10" y="26" width="12" height="0" rx="2" fill="#73d13d" opacity="0"/>
+                                            </svg>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="gear">档位</span>
-                                    <span class="metadata-value" id="metaGear">--</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="steering">方向盘</span>
-                                    <span class="metadata-value" id="metaSteering">--</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="accelerator">油门</span>
-                                    <span class="metadata-value" id="metaAccelerator">--</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="brake">刹车</span>
-                                    <span class="metadata-value" id="metaBrake">--</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="blinker">转向灯</span>
-                                    <span class="metadata-value" id="metaBlinker">--</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="autopilot">自动驾驶</span>
-                                    <span class="metadata-value" id="metaAutopilot">--</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="gps">GPS</span>
-                                    <span class="metadata-value" id="metaGPS">--</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="heading">航向</span>
-                                    <span class="metadata-value" id="metaHeading">--</span>
-                                </div>
-                                <div class="metadata-item">
-                                    <span class="metadata-label" data-i18n="acceleration">加速度</span>
-                                    <span class="metadata-value" id="metaAcceleration">--</span>
+                                
+                                <!-- Secondary Info Row -->
+                                <div class="metadata-secondary">
+                                    <div class="metadata-item">
+                                        <span class="metadata-label" data-i18n="autopilot">自动驾驶</span>
+                                        <span class="metadata-value" id="metaAutopilot">--</span>
+                                    </div>
+                                    <div class="metadata-item">
+                                        <span class="metadata-label" data-i18n="gps">GPS</span>
+                                        <span class="metadata-value" id="metaGPS">--</span>
+                                    </div>
+                                    <div class="metadata-item">
+                                        <span class="metadata-label" data-i18n="heading">航向</span>
+                                        <span class="metadata-value" id="metaHeading">--</span>
+                                    </div>
+                                    <div class="metadata-item">
+                                        <span class="metadata-label" data-i18n="acceleration">加速度</span>
+                                        <span class="metadata-value" id="metaAcceleration">--</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
