@@ -2393,10 +2393,23 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     justify-content: center;
 }
 
+.meta-blinker .blinker-fill {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
 .meta-blinker.active {
     color: #52c41a;
     filter: drop-shadow(0 0 8px rgba(82, 196, 26, 0.8));
     animation: blinker-flash 0.5s ease-in-out infinite;
+}
+
+.meta-blinker.active .blinker-fill {
+    opacity: 1;
+}
+
+.meta-blinker.active .blinker-outline {
+    stroke: #52c41a;
 }
 
 @keyframes blinker-flash {
