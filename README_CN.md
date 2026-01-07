@@ -53,8 +53,10 @@
 *   **交互式仪表盘**: 元数据面板支持自由拖拽，可放置在屏幕任何位置，并支持一键隐藏。
 *   **官方支持**: 元数据解析逻辑基于官方 [Tesla Dashcam](https://github.com/teslamotors/dashcam) 开源项目。
 
-![元数据展示1](doc/images/screenshot1.webp)
-![元数据展示2](doc/images/screenshot2.webp)
+> **注意：** 元数据仅在使用**车机系统版本 2025.44.25.11 或更高版本**录制的视频中可用。
+
+![元数据展示1](.github/assets/screenshot1.webp)
+![元数据展示2](.github/assets/screenshot2.webp)
 
 ### 🔍 智能功能
 *   **智能筛选**: 按日期和事件类型（最近、已保存、哨兵）轻松筛选录像。
@@ -92,6 +94,8 @@
 - 原生文件系统访问
 - 更好的性能
 - 离线可用
+
+![桌面应用程序](.github/assets/mac.webp)
 
 ---
 

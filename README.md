@@ -18,7 +18,7 @@ A modern, browser-based viewer for your TeslaCam footage. Play all six camera an
 ![Screenshot](./.github/assets/home.webp)
 
 ## ✨ Features
-
+   
 ### 🎥 Video Playback
 *   **Six-Camera Sync Playback**: View footage from all six cameras (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar) at once, perfectly synchronized in a 6-grid layout.
 *   **B-Pillar Camera Support**: Full support for Tesla's interior B-pillar cameras for comprehensive coverage.
@@ -53,8 +53,10 @@ A modern, browser-based viewer for your TeslaCam footage. Play all six camera an
 *   **Interactive Dashboard**: The metadata panel can be dragged anywhere on the screen and toggled with a single click.
 *   **Official Reference**: Metadata parsing logic is based on the official [Tesla Dashcam](https://github.com/teslamotors/dashcam) repository.
 
-![Metadata Display 1](doc/images/screenshot1.webp)
-![Metadata Display 2](doc/images/screenshot2.webp)
+> **Note:** Metadata is only available in videos recorded with **vehicle software version 2025.44.25.11 or later**.
+
+![Metadata Display 1](.github/assets/screenshot1.webp)
+![Metadata Display 2](.github/assets/screenshot2.webp)
 
 ### 🔍 Smart Features
 *   **Intuitive Filtering**: Easily filter recordings by date and event type (Recent, Saved, Sentry).
@@ -92,6 +94,8 @@ Download the desktop application for your platform from the [Releases](https://g
 - Native file system access
 - Better performance
 - Works offline
+
+![Desktop Application](.github/assets/mac.webp)
 
 ---
 

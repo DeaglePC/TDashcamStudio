@@ -91,6 +91,35 @@
         autopilotSelfDriving: "FSD",
         autopilotAutosteer: "Autosteer",
         autopilotTACC: "TACC"
+        exportFailed: "Export failed: ",
+        metadata: "Metadata",
+        loadingMetadata: "Loading...",
+        noMetadata: "No metadata found",
+        speed: "Speed",
+        gear: "Gear",
+        steering: "Steering",
+        accelerator: "Accelerator",
+        brake: "Brake",
+        brakeApplied: "Applied",
+        brakeNotApplied: "Not applied",
+        blinker: "Blinker",
+
+        autopilot: "Autopilot",
+        gps: "GPS",
+        heading: "Heading",
+        acceleration: "Acceleration",
+        gearPark: "Park",
+        gearDrive: "Drive",
+        gearReverse: "Reverse",
+        gearNeutral: "Neutral",
+        blinkerLeft: "Left",
+        blinkerRight: "Right",
+        blinkerBoth: "Both",
+        blinkerOff: "Off",
+        autopilotNone: "None",
+        autopilotSelfDriving: "FSD",
+        autopilotAutosteer: "Autosteer",
+        autopilotTACC: "TACC"
     },
     zh: {
         pageTitle: "TeslaCam 播放器",
@@ -1728,6 +1757,12 @@ class ModernVideoControls {
         const downloadBtn = this.viewer.dom.downloadFileBtn;
         if (downloadBtn) {
             downloadBtn.disabled = playing || !this.viewer.currentEvent;
+        }
+        
+        // Enable/disable metadata button
+        const metadataBtn = this.viewer.dom.metadataSwitchBtn;
+        if (metadataBtn) {
+            metadataBtn.disabled = !this.viewer.currentEvent;
         }
         
         // Enable/disable clip button
@@ -4264,6 +4299,7 @@ class TeslaCamViewer {
             closeModalBtn: document.getElementById('closeModalBtn'),
             revealFileBtn: document.getElementById('revealFileBtn'),
             downloadFileBtn: document.getElementById('downloadFileBtn'),
+            metadataSwitchBtn: document.getElementById('metaSwitchBtn'),
             headerLocationDisplay: document.getElementById('headerLocationDisplay'),
             // Clip modal elements
             clipModal: document.getElementById('clipModal'),
