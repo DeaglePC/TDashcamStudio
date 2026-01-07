@@ -185,6 +185,11 @@ body {
     background-color: rgba(0, 122, 255, 0.1);
 }
 
+.metadata-switch-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+}
+
 #revealFileBtn:disabled {
     cursor: not-allowed;
     opacity: 0.4;
