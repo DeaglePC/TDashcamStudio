@@ -15,7 +15,22 @@
 
 A modern, browser-based viewer for your TeslaCam footage. Play all six camera angles (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar) simultaneously with a sleek and intuitive interface. Now available as a **desktop application**!
 
+## 🆚 Why choose TeslaCam Player?
+
+Compared to the original Tesla in-car player, this project provides more powerful features and a superior experience:
+
+| Feature | Tesla In-Car Player | TeslaCam Player (This Project) |
+| :--- | :--- | :--- |
+| **Camera Support** | Only 4 channels (F/B/L/R) | **Full 6 channels** (including B-pillars) |
+| **Viewing Experience** | Limited to car screen | **Multi-device** (PC/Tablet/Mobile), clear large-screen view |
+| **Video Editing** | No editing, raw files only | **Precise visual clipping**, what you see is what you get |
+| **Exporting** | Hard to share raw segments | **One-click grid export** with real-time timestamp watermarks for easy sharing |
+| **Driving Data** | Basic playback | **Real-time dashboard** (Speed, Pedals, AP status, G-force, etc.) |
+| **Location** | Basic map display | **Map Integration** (Deep link to Google/Gaode maps) |
+| **Privacy** | - | **100% Local processing**, no cloud uploads |
+
 ![Screenshot](./.github/assets/home.webp)
+
 
 ## ✨ Features
    
