@@ -13,5 +13,5 @@
     "@tauri-apps/cli": "^2.0.0"
   },
   "author": "",
-  "license": "MIT"
+  "license": "AGPL-3.0"
 }
