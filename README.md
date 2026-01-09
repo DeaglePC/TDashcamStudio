@@ -243,5 +243,5 @@ This tool is built with privacy as a top priority. **All file processing happens
 
 ## 📄 License
 
-MIT License
+AGPL-3.0 License
 
