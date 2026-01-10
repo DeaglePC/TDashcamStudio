@@ -7,7 +7,8 @@
     "tauri": "npx tauri",
     "tauri:dev": "npx tauri dev",
     "tauri:build": "npx tauri build",
-    "serve": "npx http-server src -p 8188 -c-1"
+    "serve": "npx http-server src -p 8188 -c-1",
+    "inject:umami": "node scripts/inject-umami.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"
