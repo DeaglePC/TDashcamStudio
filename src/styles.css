@@ -2652,3 +2652,130 @@ body.dark-theme .flatpickr-calendar .flatpickr-monthDropdown-months .flatpickr-m
     font-weight: bold;
 }
 
+/* ============================================
+   Light Mode Overrides for Clip Modal
+   ============================================ */
+
+/* Clip Modal - Light Mode Background */
+body:not(.dark-theme) .clip-modal {
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+/* Clip Info Section - Light Mode */
+body:not(.dark-theme) .clip-info {
+    background: rgba(102, 126, 234, 0.08);
+    border-color: rgba(102, 126, 234, 0.2);
+}
+
+/* Clip Option Group - Light Mode */
+body:not(.dark-theme) .clip-option-group {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+body:not(.dark-theme) .clip-option-group:hover {
+    background: rgba(102, 126, 234, 0.08);
+    border-color: rgba(102, 126, 234, 0.3);
+}
+
+/* Camera Checkboxes - Light Mode */
+body:not(.dark-theme) .camera-checkboxes label {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--text-primary);
+}
+
+body:not(.dark-theme) .camera-checkboxes label:hover {
+    background: rgba(102, 126, 234, 0.1);
+    border-color: rgba(102, 126, 234, 0.3);
+}
+
+body:not(.dark-theme) .camera-checkboxes input[type="checkbox"] {
+    border: 2px solid #b0b3b8;
+    background: #ffffff;
+}
+
+body:not(.dark-theme) .camera-checkboxes input[type="checkbox"]:hover {
+    border-color: #667eea;
+    background: rgba(102, 126, 234, 0.1);
+}
+
+body:not(.dark-theme) .camera-checkboxes input[type="checkbox"]:checked {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-color: transparent;
+}
+
+/* Clip Checkbox Label - Light Mode */
+body:not(.dark-theme) .clip-checkbox-label {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: var(--text-primary);
+}
+
+body:not(.dark-theme) .clip-checkbox-label:hover {
+    background: rgba(102, 126, 234, 0.08);
+    border-color: rgba(102, 126, 234, 0.3);
+}
+
+body:not(.dark-theme) .clip-checkbox-label input[type="checkbox"] {
+    border: 2px solid #b0b3b8;
+    background: #ffffff;
+}
+
+body:not(.dark-theme) .clip-checkbox-label input[type="checkbox"]:hover {
+    border-color: #667eea;
+    background: rgba(102, 126, 234, 0.1);
+}
+
+body:not(.dark-theme) .clip-checkbox-label input[type="checkbox"]:checked {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-color: transparent;
+}
+
+/* Clip Option Group Checkbox - Light Mode */
+body:not(.dark-theme) .clip-option-group input[type="checkbox"] {
+    border: 2px solid #b0b3b8;
+    background: #ffffff;
+}
+
+body:not(.dark-theme) .clip-option-group input[type="checkbox"]:hover {
+    border-color: #667eea;
+    background: rgba(102, 126, 234, 0.1);
+}
+
+body:not(.dark-theme) .clip-option-group input[type="checkbox"]:checked {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-color: transparent;
+}
+
+/* Progress Bar - Light Mode */
+body:not(.dark-theme) .clip-progress {
+    background: rgba(102, 126, 234, 0.08);
+}
+
+body:not(.dark-theme) .progress-bar {
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Close Button - Light Mode */
+body:not(.dark-theme) .clip-modal .close-modal-btn {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--text-primary);
+}
+
+body:not(.dark-theme) .clip-modal .close-modal-btn:hover {
+    background: rgba(0, 0, 0, 0.15);
+}
+
+/* Cancel Button - Light Mode */
+body:not(.dark-theme) #cancelClipBtn {
+    background: rgba(108, 117, 125, 0.15);
+    color: var(--text-primary);
+}
+
+body:not(.dark-theme) #cancelClipBtn:hover {
+    background: rgba(108, 117, 125, 0.25);
+}
+
+
+

@@ -2132,6 +2132,7 @@ class VideoClipProcessor {
         this.ctx = null;
         this.mediaRecorder = null;
         this.recordingStartTime = null;
+        this.ffmpegFixerLoaded = false;
         this.ffmpeg = null;
     }
 
@@ -2280,6 +2281,54 @@ class VideoClipProcessor {
         const loadTime = ((performance.now() - startTime) / 1000).toFixed(1);
         console.log(`[FFmpeg] FFmpeg WASM loaded successfully in ${loadTime}s (multi-thread: ${this.ffmpegMultiThread})`);
         return this.ffmpeg;
+    }
+    
+    // Fix WebM metadata using FFmpeg WASM (for streamed files)
+    async fixWebmWithFFmpeg(fileHandle, progressCallback) {
+        try {
+            progressCallback?.('加载 FFmpeg 修复模块...');
+            const ffmpeg = await this.loadFFmpeg(progressCallback);
+            
+            // Read the file content
+            progressCallback?.('读取视频文件...');
+            const file = await fileHandle.getFile();
+            const inputData = new Uint8Array(await file.arrayBuffer());
+            
+            // Write to FFmpeg virtual filesystem
+            await ffmpeg.writeFile('input.webm', inputData);
+            
+            // Run FFmpeg to remux (copy streams, fix metadata)
+            progressCallback?.('修复视频元数据...');
+            await ffmpeg.exec([
+                '-i', 'input.webm',
+                '-c', 'copy',
+                '-y',
+                'output.webm'
+            ]);
+            
+            // Read the fixed file
+            const outputData = await ffmpeg.readFile('output.webm');
+            
+            // Clean up FFmpeg virtual filesystem
+            try {
+                await ffmpeg.deleteFile('input.webm');
+                await ffmpeg.deleteFile('output.webm');
+            } catch (e) {
+                console.warn('[FFmpeg] Cleanup warning:', e);
+            }
+            
+            // Write back to the original file
+            progressCallback?.('保存修复后的视频...');
+            const writable = await fileHandle.createWritable();
+            await writable.write(outputData);
+            await writable.close();
+            
+            console.log('[FFmpeg] WebM metadata fixed successfully');
+            return true;
+        } catch (error) {
+            console.error('[FFmpeg] Failed to fix WebM metadata:', error);
+            return false;
+        }
     }
     
     // Helper function to fetch file as Uint8Array (replaces @ffmpeg/util fetchFile)
@@ -3290,8 +3339,9 @@ class VideoClipProcessor {
         let totalChunkSize = 0;
         let writable = null;
         
-        // Write queue system
+        // Write queue system to avoid Promise chain memory leaks
         const writeQueue = [];
+        let writeQueueSize = 0;
         let isWriting = false;
         
         const processWriteQueue = async () => {
@@ -3300,6 +3350,10 @@ class VideoClipProcessor {
             
             while (writeQueue.length > 0) {
                 const blob = writeQueue.shift();
+                if (!blob) {
+                    continue;
+                }
+                writeQueueSize -= blob.size || 0;
                 try {
                     await writable.write(blob);
                 } catch (err) {
@@ -3411,20 +3465,38 @@ class VideoClipProcessor {
                 segmentTime = this.parseTimestamp(clipSegment.timestamp);
             }
             
-            const segmentStartTimestamp = new Date(segmentTime.getTime() + clipSegment.clipStart * 1000);
             const segmentEndTime = clipSegment.clipEnd;
+            
+            // Adjust clipStart if it exceeds video duration
+            const actualClipStart = Math.min(clipSegment.clipStart, video.duration);
+            // Adjust clipEnd based on actual video duration
             const actualEndTime = Math.min(segmentEndTime, video.duration);
+            
+            // Calculate timestamp based on actual clip start
+            const segmentStartTimestamp = new Date(segmentTime.getTime() + actualClipStart * 1000);
+            
+            // Skip this segment if clipStart is already past video duration
+            if (actualClipStart >= video.duration) {
+                console.warn(`Segment ${i + 1}: clipStart (${clipSegment.clipStart}) exceeds video duration (${video.duration}), skipping`);
+                // Release video resources
+                URL.revokeObjectURL(video.src);
+                video.src = '';
+                video.load();
+                continue;
+            }
             
             console.log(`Processing single camera segment ${i + 1}/${clipSegments.length}:`, {
                 clipStart: clipSegment.clipStart,
+                actualClipStart,
                 clipEnd: clipSegment.clipEnd,
                 segmentEndTime,
                 actualEndTime,
-                videoDuration: video.duration
+                videoDuration: video.duration,
+                actualDuration: actualEndTime - actualClipStart
             });
             
             // Seek to clip start position
-            video.currentTime = clipSegment.clipStart;
+            video.currentTime = actualClipStart;
             await new Promise((resolve) => {
                 video.onseeked = resolve;
             });
@@ -3451,7 +3523,7 @@ class VideoClipProcessor {
                             this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
                             
                             if (addTimestamp) {
-                                const currentTime = new Date(segmentStartTimestamp.getTime() + (video.currentTime - clipSegment.clipStart) * 1000);
+                                const currentTime = new Date(segmentStartTimestamp.getTime() + (video.currentTime - actualClipStart) * 1000);
                                 const timeString = currentTime.toLocaleString('zh-CN', {
                                     year: 'numeric',
                                     month: '2-digit',
@@ -3515,7 +3587,7 @@ class VideoClipProcessor {
                         this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
                         
                         if (addTimestamp) {
-                            const currentTime = new Date(segmentStartTimestamp.getTime() + (t - clipSegment.clipStart) * 1000);
+                            const currentTime = new Date(segmentStartTimestamp.getTime() + (t - actualClipStart) * 1000);
                             const timeString = currentTime.toLocaleString('zh-CN', {
                                 year: 'numeric',
                                 month: '2-digit',
@@ -3588,7 +3660,11 @@ class VideoClipProcessor {
         }
         
         if (result.saved) {
-             return result;
+            // For streamed files, use FFmpeg to fix metadata
+            if (fileHandle) {
+                await this.fixWebmWithFFmpeg(fileHandle, progressCallback);
+            }
+            return result;
         }
 
         progressCallback?.('修复视频元数据...');
@@ -3852,31 +3928,52 @@ class VideoClipProcessor {
                 segmentTime = this.parseTimestamp(clipSegment.timestamp);
             }
             
-            const segmentStartTimestamp = new Date(segmentTime.getTime() + clipSegment.clipStart * 1000);
             const segmentEndTime = clipSegment.clipEnd;
             
             const videoEntries = Object.entries(videos);
             const firstVideo = videoEntries[0][1];
             
+            // Adjust clipStart if it exceeds video duration
+            const actualClipStart = Math.min(clipSegment.clipStart, firstVideo.duration);
+            // Adjust clipEnd based on actual video duration
+            const actualEndTime = Math.min(segmentEndTime, firstVideo.duration);
+            
+            // Calculate timestamp based on actual clip start
+            const segmentStartTimestamp = new Date(segmentTime.getTime() + actualClipStart * 1000);
+            
+            // Skip this segment if clipStart is already past video duration
+            if (actualClipStart >= firstVideo.duration) {
+                console.warn(`Grid segment ${i + 1}: clipStart (${clipSegment.clipStart}) exceeds video duration (${firstVideo.duration}), skipping`);
+                // Release video resources
+                for (const video of Object.values(videos)) {
+                    URL.revokeObjectURL(video.src);
+                    video.src = '';
+                    video.load();
+                }
+                continue;
+            }
+            
             console.log(`Processing segment ${i + 1}/${clipSegments.length}:`, {
                 clipStart: clipSegment.clipStart,
+                actualClipStart,
                 clipEnd: clipSegment.clipEnd,
                 clipDuration: clipSegment.clipDuration,
                 segmentEndTime,
-                videoDuration: firstVideo.duration
+                actualEndTime,
+                videoDuration: firstVideo.duration,
+                actualDuration: actualEndTime - actualClipStart
             });
             
             // Seek all videos to clip start position
             for (const video of Object.values(videos)) {
-                video.currentTime = clipSegment.clipStart;
+                video.currentTime = actualClipStart;
                 video.playbackRate = 1.0;
             }
             await Promise.all(Object.values(videos).map(video => 
                 new Promise(resolve => { video.onseeked = resolve; })
             ));
             
-            const actualEndTime = Math.min(segmentEndTime, firstVideo.duration);
-            const segmentDuration = actualEndTime - clipSegment.clipStart;
+            const segmentDuration = actualEndTime - actualClipStart;
             const segmentFrameCount = Math.ceil(segmentDuration * FPS);
             console.log(`Segment ${i + 1}: clipStart=${clipSegment.clipStart}, actualEndTime=${actualEndTime}, segmentDuration=${segmentDuration}s, expectedFrames=${segmentFrameCount}`);
             
@@ -4001,7 +4098,7 @@ class VideoClipProcessor {
             
             // Draw timestamp if needed
             if (addTimestamp) {
-                const currentTime = new Date(segmentStartTimestamp.getTime() + (videoTime - clipSegment.clipStart) * 1000);
+                const currentTime = new Date(segmentStartTimestamp.getTime() + (videoTime - actualClipStart) * 1000);
                 const timeString = currentTime.toLocaleString('zh-CN', {
                     year: 'numeric',
                     month: '2-digit',
@@ -4203,7 +4300,11 @@ class VideoClipProcessor {
         }
         
         if (result.saved) {
-             return result;
+            // For streamed files, use FFmpeg to fix metadata
+            if (fileHandle) {
+                await this.fixWebmWithFFmpeg(fileHandle, progressCallback);
+            }
+            return result;
         }
 
         progressCallback?.('修复视频元数据...');
