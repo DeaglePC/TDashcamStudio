@@ -450,7 +450,7 @@ class MetadataOverlayGenerator {
      * Generate a static background PNG for the overlay bar
      */
     async generateBackgroundPng() {
-        const barWidth = 560;
+        const barWidth = 500;
         const barHeight = 65;
         const canvas = document.createElement('canvas');
         canvas.width = barWidth;
@@ -493,7 +493,7 @@ class MetadataOverlayGenerator {
     async generateMetadataOverlayPng(data) {
         // We use a fixed height for the bar - increased size
         const barHeight = 65;
-        const barWidth = 560;
+        const barWidth = 500;
         const iconSize = 30;
 
         // Get values
@@ -504,12 +504,16 @@ class MetadataOverlayGenerator {
         const gear = this.gearMap[data.gearState] || '--';
         const gearText = `[${gear}]`;
         
-        const autopilot = this.autopilotMap[data.autopilotState] || '';
-        const showAutopilot = autopilot && data.autopilotState !== 'NONE';
+        // Autopilot state for steering wheel color
+        const autopilotState = data.autopilotState || 'NONE';
         
         // Accelerator: use 10% bucket for both display and icon to match state key
         const accelPercent = Math.round(data.acceleratorPedalPosition || 0);
         const accelBucket = Math.floor(accelPercent / 10) * 10;
+        
+        // Steering angle: use 10° bucket to match state key
+        const steeringAngle = Math.round(data.steeringWheelAngle || 0);
+        const steeringBucket = Math.round(steeringAngle / 10) * 10;
 
         // Create actual canvas for drawing
         const canvas = document.createElement('canvas');
@@ -524,7 +528,7 @@ class MetadataOverlayGenerator {
         ctx.textBaseline = 'middle';
         const yCenter = barHeight / 2;
         
-        // Layout: Speed -> Gear -> Blinkers -> Accel -> Brake -> [Autopilot]
+        // Layout: Speed -> Gear -> Blinkers -> Accel -> Brake -> Steering Wheel
         
         // Speed (Fixed area, right-aligned at 125)
         ctx.fillStyle = '#ffffff';
@@ -554,12 +558,8 @@ class MetadataOverlayGenerator {
         // Brake (Fixed at 380)
         this.drawBrakeIcon(ctx, 380, yCenter, iconSize, data.brakeApplied);
 
-        // Autopilot (Moved to the end to avoid middle gaps)
-        if (showAutopilot) {
-            this.drawAutopilotIcon(ctx, 435, yCenter, iconSize);
-            ctx.fillStyle = '#1890ff';
-            ctx.fillText(autopilot, 470, yCenter);
-        }
+        // Steering Wheel (Fixed at 435) - color based on autopilot state
+        this.drawSteeringWheelIcon(ctx, 435, yCenter, iconSize, steeringBucket, autopilotState);
         
         return new Promise((resolve) => {
             canvas.toBlob((blob) => {
@@ -759,6 +759,103 @@ class MetadataOverlayGenerator {
         ctx.restore();
     }
     
+    // Draw steering wheel icon with rotation and autopilot color (matches web version)
+    drawSteeringWheelIcon(ctx, x, y, size, angle, autopilotState) {
+        // Determine color based on autopilot state
+        let color = 'rgba(255,255,255,0.9)'; // Default: white
+        let shadowColor = 'transparent';
+        
+        if (autopilotState === 'SELF_DRIVING') {
+            color = '#52c41a'; // Green for full self-driving
+            shadowColor = 'rgba(82, 196, 26, 0.5)';
+        } else if (autopilotState === 'AUTOSTEER' || autopilotState === 'TACC') {
+            color = '#1890ff'; // Blue for autopilot/TACC
+            shadowColor = 'rgba(24, 144, 255, 0.5)';
+        }
+        
+        ctx.save();
+        
+        // Apply shadow for active states
+        if (shadowColor !== 'transparent') {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = shadowColor;
+        }
+        
+        // Move to center of icon and rotate
+        const cx = x + size / 2;
+        const cy = y;
+        ctx.translate(cx, cy);
+        ctx.rotate((angle * Math.PI) / 180);
+        
+        // Scale factor: SVG viewBox is 64x64, we scale to fit 'size'
+        const scale = size / 64;
+        const r = 28 * scale; // outer ring radius (from SVG: r="28")
+        const hubR = 9 * scale; // hub radius (from SVG: r="9")
+        const strokeWidth = 5 * scale;
+        const spokeHeight = 8 * scale;
+        const spokeWidth = 19 * scale;
+        const spokeRx = 2 * scale;
+        
+        // Draw outer ring (steering wheel rim)
+        ctx.strokeStyle = color;
+        ctx.lineWidth = strokeWidth;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Draw center hub circle
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, 0, hubR, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw three spokes as rounded rectangles (like web SVG)
+        ctx.fillStyle = color;
+        
+        // Left spoke: rect x="4" y="28" width="19" height="8" (centered at y=32)
+        // In our coordinate system (centered at 0,0): x from -28 to -9, y from -4 to +4
+        const leftSpokeX = -r - strokeWidth / 2;
+        const leftSpokeY = -spokeHeight / 2;
+        this.drawRoundedRect(ctx, leftSpokeX, leftSpokeY, spokeWidth, spokeHeight, spokeRx);
+        ctx.fill();
+        
+        // Right spoke: rect x="41" y="28" width="19" height="8"
+        // In our coordinate system: x from +9 to +28, y from -4 to +4
+        const rightSpokeX = r - spokeWidth + strokeWidth / 2;
+        const rightSpokeY = -spokeHeight / 2;
+        this.drawRoundedRect(ctx, rightSpokeX, rightSpokeY, spokeWidth, spokeHeight, spokeRx);
+        ctx.fill();
+        
+        // Bottom spoke: rect x="28" y="41" width="8" height="19"
+        // In our coordinate system: x from -4 to +4, y from +9 to +28
+        const bottomSpokeX = -spokeHeight / 2;
+        const bottomSpokeY = hubR;
+        this.drawRoundedRect(ctx, bottomSpokeX, bottomSpokeY, spokeHeight, spokeWidth, spokeRx);
+        ctx.fill();
+        
+        ctx.restore();
+    }
+    
+    // Helper: draw rounded rectangle
+    drawRoundedRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(x, y, width, height, radius);
+        } else {
+            // Fallback for older browsers
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+    }
+    
     /**
      * Generate unique key for metadata state (for caching overlay PNGs)
      */
@@ -773,7 +870,11 @@ class MetadataOverlayGenerator {
         const accelPercent = Math.round(data.acceleratorPedalPosition || 0);
         const accelBucket = Math.floor(accelPercent / 10) * 10;
         
-        return `${speedKmh}_${gear}_${data.blinkerOnLeft ? 1 : 0}_${data.blinkerOnRight ? 1 : 0}_${data.autopilotState || 'NONE'}_${accelBucket}_${data.brakeApplied ? 1 : 0}`;
+        // Steering angle bucket: 10° granularity to reduce unique states
+        const steeringAngle = Math.round(data.steeringWheelAngle || 0);
+        const steeringBucket = Math.round(steeringAngle / 10) * 10;
+        
+        return `${speedKmh}_${gear}_${data.blinkerOnLeft ? 1 : 0}_${data.blinkerOnRight ? 1 : 0}_${data.autopilotState || 'NONE'}_${accelBucket}_${data.brakeApplied ? 1 : 0}_${steeringBucket}`;
     }
     
     /**
@@ -788,7 +889,8 @@ class MetadataOverlayGenerator {
             blinkerRight: parts[3] === '1',
             autopilotState: parts[4],
             accelBucket: parseInt(parts[5]),
-            brakeApplied: parts[6] === '1'
+            brakeApplied: parts[6] === '1',
+            steeringBucket: parseInt(parts[7] || '0')
         };
     }
     
