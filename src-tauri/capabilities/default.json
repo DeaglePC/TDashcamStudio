@@ -63,6 +63,21 @@
           "args": true
         }
       ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "ffmpeg",
+          "cmd": "ffmpeg",
+          "args": true
+        },
+        {
+          "name": "binaries/ffmpeg",
+          "sidecar": true,
+          "args": true
+        }
+      ]
     }
   ]
 }
