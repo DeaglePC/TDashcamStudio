@@ -450,7 +450,7 @@ class MetadataOverlayGenerator {
      * Generate a static background PNG for the overlay bar
      */
     async generateBackgroundPng() {
-        const barWidth = 500;
+        const barWidth = 480;
         const barHeight = 65;
         const canvas = document.createElement('canvas');
         canvas.width = barWidth;
@@ -493,7 +493,7 @@ class MetadataOverlayGenerator {
     async generateMetadataOverlayPng(data) {
         // We use a fixed height for the bar - increased size
         const barHeight = 65;
-        const barWidth = 500;
+        const barWidth = 480;
         const iconSize = 30;
 
         // Get values
@@ -996,35 +996,51 @@ class MetadataOverlayGenerator {
             const segmentMetadata = allMetadata.find(m => m.segmentIndex === segIdx);
             const clipStart = clipSeg.clipStart || 0;
             const clipEnd = clipSeg.clipEnd || (clipSeg.clipDuration || 60);
+            const segmentDuration = clipEnd - clipStart;
             
             if (segmentMetadata && segmentMetadata.metadata) {
                 const metadata = segmentMetadata.metadata;
-                for (let i = 0; i < metadata.length; i++) {
-                    const item = metadata[i];
-                    if (item.time < clipStart || item.time > clipEnd) continue;
-
-                    const relativeStart = accumulatedTime + (item.time - clipStart);
+                
+                // Fixed 0.5 second update interval
+                const updateInterval = 0.5;
+                const numIntervals = Math.ceil(segmentDuration / updateInterval);
+                
+                for (let i = 0; i < numIntervals; i++) {
+                    const intervalStart = clipStart + i * updateInterval;
+                    const intervalEnd = Math.min(clipStart + (i + 1) * updateInterval, clipEnd);
+                    const intervalDuration = intervalEnd - intervalStart;
                     
-                    // Fill gap before this item if exists
+                    if (intervalDuration <= 0) continue;
+                    
+                    // Find the closest metadata item for this interval
+                    let closestItem = null;
+                    let closestDist = Infinity;
+                    for (const item of metadata) {
+                        const dist = Math.abs(item.time - intervalStart);
+                        if (dist < closestDist) {
+                            closestDist = dist;
+                            closestItem = item;
+                        }
+                    }
+                    
+                    if (!closestItem || !closestItem.data) continue;
+                    
+                    const relativeStart = accumulatedTime + (intervalStart - clipStart);
+                    
+                    // Fill gap before this interval if exists
                     if (relativeStart > lastEndTime + 0.001) {
                         concatLines.push(`file '${safeTransPath}'`);
                         concatLines.push(`duration ${(relativeStart - lastEndTime).toFixed(4)}`);
                     }
 
-                    const key = this.getMetadataStateKey(item.data);
+                    const key = this.getMetadataStateKey(closestItem.data);
                     const pngPath = pngPaths.get(key);
                     if (pngPath) {
                         // FFmpeg concat demuxer needs forward slashes even on Windows
                         const safePath = pngPath.replace(/\\/g, '/').replace(/'/g, "'\\''");
                         concatLines.push(`file '${safePath}'`);
-                        let duration = 0.1; // default
-                        if (i + 1 < metadata.length && metadata[i+1].time <= clipEnd) {
-                            duration = metadata[i+1].time - item.time;
-                        } else {
-                            duration = clipEnd - item.time;
-                        }
-                        concatLines.push(`duration ${duration.toFixed(4)}`);
-                        lastEndTime = relativeStart + duration;
+                        concatLines.push(`duration ${intervalDuration.toFixed(4)}`);
+                        lastEndTime = relativeStart + intervalDuration;
                     }
                 }
             }
@@ -3413,15 +3429,126 @@ class VideoClipProcessor {
         console.log('[VideoClipProcessor] Cleanup completed');
     }
 
+
+    // IndexedDB cache for FFmpeg WASM files
+    static FFMPEG_CACHE_DB = 'FFmpegWASMCache';
+    static FFMPEG_CACHE_STORE = 'files';
+    static FFMPEG_CACHE_VERSION = '0.12.6'; // Update when upgrading FFmpeg version
+    
+    async openCacheDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(VideoClipProcessor.FFMPEG_CACHE_DB, 1);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(VideoClipProcessor.FFMPEG_CACHE_STORE)) {
+                    db.createObjectStore(VideoClipProcessor.FFMPEG_CACHE_STORE, { keyPath: 'url' });
+                }
+            };
+        });
+    }
+    
+    async getCachedFile(db, url) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction([VideoClipProcessor.FFMPEG_CACHE_STORE], 'readonly');
+            const store = transaction.objectStore(VideoClipProcessor.FFMPEG_CACHE_STORE);
+            const request = store.get(url);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+        });
+    }
+    
+    async setCachedFile(db, url, data, mimeType) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction([VideoClipProcessor.FFMPEG_CACHE_STORE], 'readwrite');
+            const store = transaction.objectStore(VideoClipProcessor.FFMPEG_CACHE_STORE);
+            const request = store.put({ 
+                url, 
+                data, 
+                mimeType, 
+                version: VideoClipProcessor.FFMPEG_CACHE_VERSION,
+                timestamp: Date.now() 
+            });
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+        });
+    }
+    
+    async toBlobURLWithCache(url, mimeType, progressCallback) {
+        try {
+            const db = await this.openCacheDB();
+            const cached = await this.getCachedFile(db, url);
+            
+            // Check if cached and version matches
+            if (cached && cached.version === VideoClipProcessor.FFMPEG_CACHE_VERSION && cached.data) {
+                console.log(`[FFmpeg] Loading from cache: ${url.split('/').pop()}`);
+                const blob = new Blob([cached.data], { type: mimeType });
+                db.close();
+                return URL.createObjectURL(blob);
+            }
+            
+            // Download and cache
+            console.log(`[FFmpeg] Downloading: ${url.split('/').pop()}`);
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch ${url}: ${response.status}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            const data = new Uint8Array(arrayBuffer);
+            
+            // Save to cache
+            try {
+                await this.setCachedFile(db, url, data, mimeType);
+                console.log(`[FFmpeg] Cached: ${url.split('/').pop()}`);
+            } catch (cacheError) {
+                console.warn('[FFmpeg] Failed to cache file:', cacheError);
+            }
+            
+            db.close();
+            return URL.createObjectURL(new Blob([arrayBuffer], { type: mimeType }));
+        } catch (error) {
+            // Fallback to direct download without caching
+            console.warn('[FFmpeg] Cache failed, downloading directly:', error);
+            const response = await fetch(url);
+            const blob = await response.blob();
+            return URL.createObjectURL(new Blob([await blob.arrayBuffer()], { type: mimeType }));
+        }
+    }
+
     async loadFFmpeg(progressCallback) {
         if (this.ffmpeg && this.ffmpegLoaded) return this.ffmpeg;
         
-        // Try different global names for FFmpeg WASM library
-        // CDN UMD build exposes FFmpegWASM global
-        const FFmpegLib = window.FFmpegWASM || window.FFmpeg;
+        // Dynamically load FFmpeg WASM library if not already loaded
+        let FFmpegLib = window.FFmpegWASM || window.FFmpeg;
         
         if (!FFmpegLib) {
-            throw new Error('FFmpeg WASM library not loaded. Please check if the script is included.');
+            progressCallback?.('加载 FFmpeg 库...');
+            console.log('[FFmpeg] Dynamically loading FFmpeg WASM library...');
+            
+            try {
+                // Try ESM import first - much better for cross-origin and avoids UMD chunk issues
+                // Use version 0.12.6 to match core
+                const module = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/+esm');
+                FFmpegLib = module;
+                console.log('[FFmpeg] FFmpeg library loaded via ESM');
+            } catch (esmError) {
+                console.warn('[FFmpeg] ESM import failed, falling back to UMD script tag:', esmError);
+                // Fallback to the UMD script tag if ESM fails
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    // Use 0.12.6 for better compatibility with core 0.12.6
+                    script.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/umd/ffmpeg.min.js';
+                    script.onload = resolve;
+                    script.onerror = () => reject(new Error('Failed to load FFmpeg library via script tag'));
+                    document.head.appendChild(script);
+                });
+                FFmpegLib = window.FFmpegWASM || window.FFmpeg;
+            }
+
+            if (!FFmpegLib) {
+                throw new Error('FFmpeg WASM library failed to initialize');
+            }
         }
 
         const { FFmpeg } = FFmpegLib;
@@ -3456,27 +3583,33 @@ class VideoClipProcessor {
         
         const startTime = performance.now();
         
-        // Load from local files for faster loading and offline support
-        // Must use absolute URLs for ffmpeg.wasm to work correctly
-        const baseURL = new URL('libs/ffmpeg', window.location.href).href;
+        // Load from CDN for web version
+        // Use unpkg CDN for ffmpeg core files
+        // Must use toBlobURL to convert remote scripts to Blob URLs to bypass CORS Worker restrictions
+        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+        const baseURLMT = 'https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/umd';
         
         try {
             if (useMultiThread) {
                 // Multi-threaded version - faster but requires COOP/COEP headers
-                await this.ffmpeg.load({
-                    coreURL: `${baseURL}/ffmpeg-core-mt.js`,
-                    wasmURL: `${baseURL}/ffmpeg-core-mt.wasm`,
-                    workerURL: `${baseURL}/ffmpeg-core.worker.js`,
-                    classWorkerURL: `${baseURL}/814.ffmpeg.js`,
-                });
+                progressCallback?.('加载 FFmpeg 核心文件 (使用本地缓存)...');
+                const [coreURL, wasmURL, workerURL] = await Promise.all([
+                    this.toBlobURLWithCache(`${baseURLMT}/ffmpeg-core.js`, 'text/javascript', progressCallback),
+                    this.toBlobURLWithCache(`${baseURLMT}/ffmpeg-core.wasm`, 'application/wasm', progressCallback),
+                    this.toBlobURLWithCache(`${baseURLMT}/ffmpeg-core.worker.js`, 'text/javascript', progressCallback),
+                ]);
+                progressCallback?.('初始化 FFmpeg...');
+                await this.ffmpeg.load({ coreURL, wasmURL, workerURL });
                 this.ffmpegMultiThread = true;
             } else {
                 // Single-threaded version - more stable
-                await this.ffmpeg.load({
-                    coreURL: `${baseURL}/ffmpeg-core.js`,
-                    wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-                    classWorkerURL: `${baseURL}/814.ffmpeg.js`,
-                });
+                progressCallback?.('加载 FFmpeg 核心文件 (使用本地缓存)...');
+                const [coreURL, wasmURL] = await Promise.all([
+                    this.toBlobURLWithCache(`${baseURL}/ffmpeg-core.js`, 'text/javascript', progressCallback),
+                    this.toBlobURLWithCache(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm', progressCallback),
+                ]);
+                progressCallback?.('初始化 FFmpeg...');
+                await this.ffmpeg.load({ coreURL, wasmURL });
                 this.ffmpegMultiThread = false;
             }
         } catch (mtError) {
@@ -3484,11 +3617,11 @@ class VideoClipProcessor {
             if (useMultiThread) {
                 console.warn('[FFmpeg] Multi-thread load failed, falling back to single-thread:', mtError);
                 progressCallback?.('多线程加载失败，使用单线程模式...');
-                await this.ffmpeg.load({
-                    coreURL: `${baseURL}/ffmpeg-core.js`,
-                    wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-                    classWorkerURL: `${baseURL}/814.ffmpeg.js`,
-                });
+                const [coreURL, wasmURL] = await Promise.all([
+                    this.toBlobURLWithCache(`${baseURL}/ffmpeg-core.js`, 'text/javascript', progressCallback),
+                    this.toBlobURLWithCache(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm', progressCallback),
+                ]);
+                await this.ffmpeg.load({ coreURL, wasmURL });
                 this.ffmpegMultiThread = false;
             } else {
                 throw mtError;
@@ -4792,10 +4925,11 @@ class VideoClipProcessor {
                     tempFiles.push(overlayResult.concatFile);
 
                     // Scale down metadata overlay for grid view to match single camera proportions
-                    // Single camera: 1280x960, Grid: 1920x1080 (or larger)
-                    // Scale factor: ~0.67 to maintain visual consistency
-                    const scaleFactor = 0.67;
-                    const scaledBgWidth = Math.round(560 * scaleFactor);
+                    // Front camera reference: 2896px width video -> 480px box width
+                    // Target grid width: 1920px -> 1920 * (480 / 2896) ≈ 318px
+                    const referenceWidth = 2896;
+                    const scaleFactor = 1920 / referenceWidth;
+                    const scaledBgWidth = Math.round(480 * scaleFactor);
                     const scaledBgHeight = Math.round(65 * scaleFactor);
                     
                     // Overlay background then metadata stream with scaling
@@ -5315,9 +5449,19 @@ class VideoClipProcessor {
         }
         
         if (result.saved) {
-            // For streamed files, use FFmpeg to fix metadata
+            // For streamed files, try to use FFmpeg to fix metadata
+            // If FFmpeg fails, the video is still playable (just without accurate duration)
             if (fileHandle) {
-                await this.fixWebmWithFFmpeg(fileHandle, progressCallback);
+                try {
+                    const fixed = await this.fixWebmWithFFmpeg(fileHandle, progressCallback);
+                    if (!fixed) {
+                        console.warn('[Grid Video Export] FFmpeg metadata fix failed, video may have inaccurate duration');
+                        progressCallback?.('视频已保存（元数据修复跳过）');
+                    }
+                } catch (e) {
+                    console.warn('[Grid Video Export] FFmpeg metadata fix error:', e);
+                    progressCallback?.('视频已保存（元数据修复跳过）');
+                }
             }
             return result;
         }
@@ -5629,13 +5773,35 @@ class VideoClipProcessor {
                 actualDuration: actualEndTime - actualClipStart
             });
             
-            // Seek all videos to clip start position
-            for (const video of Object.values(videos)) {
-                video.currentTime = actualClipStart;
-                video.playbackRate = 1.0;
-            }
+            // Seek all videos to clip start position with timeout
+            const seekWithTimeout = (video, targetTime, timeout = 5000) => {
+                return new Promise((resolve) => {
+                    // If already at target position (within tolerance), resolve immediately
+                    if (Math.abs(video.currentTime - targetTime) < 0.1) {
+                        video.playbackRate = 1.0;
+                        resolve();
+                        return;
+                    }
+                    
+                    const timeoutId = setTimeout(() => {
+                        console.warn(`[Grid] Seek timeout for video, forcing continue`);
+                        video.onseeked = null;
+                        resolve();
+                    }, timeout);
+                    
+                    video.onseeked = () => {
+                        clearTimeout(timeoutId);
+                        video.onseeked = null;
+                        resolve();
+                    };
+                    
+                    video.playbackRate = 1.0;
+                    video.currentTime = targetTime;
+                });
+            };
+            
             await Promise.all(Object.values(videos).map(video => 
-                new Promise(resolve => { video.onseeked = resolve; })
+                seekWithTimeout(video, actualClipStart)
             ));
             
             const segmentDuration = actualEndTime - actualClipStart;
@@ -5825,18 +5991,34 @@ class VideoClipProcessor {
                 await new Promise((resolve) => {
                     let resolved = false;
                     const masterVideo = firstVideo;
+                    let lastFrameTime = Date.now();
+                    let stuckCheckInterval = null;
                     
                     const stopAll = () => {
                         if (resolved) return;
                         resolved = true;
+                        if (stuckCheckInterval) clearInterval(stuckCheckInterval);
                         for (const video of Object.values(videos)) {
                             video.pause();
                         }
                         resolve();
                     };
                     
+                    // Check if video is stuck (no frame for 10 seconds)
+                    stuckCheckInterval = setInterval(() => {
+                        if (resolved) {
+                            clearInterval(stuckCheckInterval);
+                            return;
+                        }
+                        if (Date.now() - lastFrameTime > 10000) {
+                            console.warn(`[Grid] Video playback stuck, forcing continue. currentTime=${masterVideo.currentTime}, targetEnd=${actualEndTime}`);
+                            stopAll();
+                        }
+                    }, 2000);
+                    
                     const onFrame = () => {
                         if (resolved) return;
+                        lastFrameTime = Date.now();
                         
                         const t = masterVideo.currentTime;
                         if (t >= actualEndTime - 0.02 || masterVideo.ended) {
@@ -5863,9 +6045,18 @@ class VideoClipProcessor {
                         masterVideo.requestVideoFrameCallback(onFrame);
                     };
                     
-                    Promise.all(Object.values(videos).map(v => v.play().catch(() => null)))
+                    Promise.all(Object.values(videos).map(v => v.play().catch((e) => {
+                        console.warn('[Grid] Video play failed:', e);
+                        return null;
+                    })))
                         .then(() => {
-                            masterVideo.requestVideoFrameCallback(onFrame);
+                            if (!resolved) {
+                                masterVideo.requestVideoFrameCallback(onFrame);
+                            }
+                        })
+                        .catch((e) => {
+                            console.error('[Grid] Failed to start video playback:', e);
+                            stopAll();
                         });
                 });
             } else {
@@ -5874,18 +6065,34 @@ class VideoClipProcessor {
                     let resolved = false;
                     const masterVideo = firstVideo;
                     const frameInterval = 1000 / FPS;
+                    let lastTickTime = Date.now();
+                    let stuckCheckInterval = null;
                     
                     const stopAll = () => {
                         if (resolved) return;
                         resolved = true;
+                        if (stuckCheckInterval) clearInterval(stuckCheckInterval);
                         for (const video of Object.values(videos)) {
                             video.pause();
                         }
                         resolve();
                     };
                     
+                    // Check if video is stuck (no tick for 10 seconds)
+                    stuckCheckInterval = setInterval(() => {
+                        if (resolved) {
+                            clearInterval(stuckCheckInterval);
+                            return;
+                        }
+                        if (Date.now() - lastTickTime > 10000) {
+                            console.warn(`[Grid] Video playback stuck (fallback mode), forcing continue`);
+                            stopAll();
+                        }
+                    }, 2000);
+                    
                     const tick = () => {
                         if (resolved) return;
+                        lastTickTime = Date.now();
                         const t = masterVideo.currentTime;
                         if (t >= actualEndTime - 0.02 || masterVideo.ended) {
                             stopAll();
@@ -5901,9 +6108,18 @@ class VideoClipProcessor {
                         setTimeout(tick, frameInterval);
                     };
                     
-                    Promise.all(Object.values(videos).map(v => v.play().catch(() => null)))
+                    Promise.all(Object.values(videos).map(v => v.play().catch((e) => {
+                        console.warn('[Grid] Video play failed (fallback):', e);
+                        return null;
+                    })))
                         .then(() => {
-                            tick();
+                            if (!resolved) {
+                                tick();
+                            }
+                        })
+                        .catch((e) => {
+                            console.error('[Grid] Failed to start video playback (fallback):', e);
+                            stopAll();
                         });
                 });
             }
@@ -5972,9 +6188,19 @@ class VideoClipProcessor {
         }
         
         if (result.saved) {
-            // For streamed files, use FFmpeg to fix metadata
+            // For streamed files, try to use FFmpeg to fix metadata
+            // If FFmpeg fails, the video is still playable (just without accurate duration)
             if (fileHandle) {
-                await this.fixWebmWithFFmpeg(fileHandle, progressCallback);
+                try {
+                    const fixed = await this.fixWebmWithFFmpeg(fileHandle, progressCallback);
+                    if (!fixed) {
+                        console.warn('[Grid Video Export] FFmpeg metadata fix failed, video may have inaccurate duration');
+                        progressCallback?.('视频已保存（元数据修复跳过）');
+                    }
+                } catch (e) {
+                    console.warn('[Grid Video Export] FFmpeg metadata fix error:', e);
+                    progressCallback?.('视频已保存（元数据修复跳过）');
+                }
             }
             return result;
         }
@@ -5986,14 +6212,21 @@ class VideoClipProcessor {
     }
     
     drawTimestamp(timeString) {
+        // Dynamic scaling
+        const referenceWidth = 2896;
+        const scale = this.canvas.width / referenceWidth;
+        
+        const fontSize = Math.round(28 * scale);
+        const padding = 15 * scale;
+        const boxHeight = 40 * scale;
+        const margin = 20 * scale;
+        
         // Measure text width
-        this.ctx.font = 'bold 28px Arial';
+        this.ctx.font = `bold ${fontSize}px Arial`;
         const textWidth = this.ctx.measureText(timeString).width;
-        const padding = 15;
         const boxWidth = textWidth + padding * 2;
-        const boxHeight = 40;
-        const x = this.canvas.width - boxWidth - 20;
-        const y = 20;
+        const x = this.canvas.width - boxWidth - margin;
+        const y = margin;
         
         // Draw background (top-right corner)
         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
@@ -6001,7 +6234,8 @@ class VideoClipProcessor {
         
         // Draw text
         this.ctx.fillStyle = '#fff';
-        this.ctx.fillText(timeString, x + padding, y + 30);
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(timeString, x + padding, y + boxHeight / 2);
     }
     
     // Load metadata for all segments
@@ -6086,20 +6320,61 @@ class VideoClipProcessor {
     }
     
     // Draw metadata overlay at bottom center with SVG icons
+    /**
+     * Draw metadata overlay on canvas
+     */
     drawMetadata(metadataData, lang = 'zh') {
         if (!metadataData) return;
         
         const d = metadataData;
-        const icons = this.metadataIcons;
-        const iconSize = icons?.iconSize || 24;
-        const spacing = 8;  // Space between elements
-        const padding = 12;
-        const boxHeight = 36;
         
-        // Calculate speed
+        // Dynamic scaling based on reference: 480px width box is "just right" for 2896px width video
+        const referenceWidth = 2896;
+        const scale = this.canvas.width / referenceWidth;
+        
+        const barWidth = 480 * scale;
+        const barHeight = 65 * scale;
+        const iconSize = 30 * scale;
+        const borderRadius = 16 * scale;
+        const fontSize = 24 * scale;
+        
+        // Position: Bottom center
+        const x = (this.canvas.width - barWidth) / 2;
+        const y = this.canvas.height - barHeight - (20 * scale);
+        
+        // Draw background bar (Glassmorphism effect)
+        this.ctx.save();
+        const gradient = this.ctx.createLinearGradient(x, y, x, y + barHeight);
+        gradient.addColorStop(0, 'rgba(20, 20, 20, 0.3)');
+        gradient.addColorStop(1, 'rgba(5, 5, 5, 0.35)');
+        this.ctx.fillStyle = gradient;
+        
+        this.ctx.beginPath();
+        if (this.ctx.roundRect) {
+            this.ctx.roundRect(x, y, barWidth, barHeight, borderRadius);
+        } else {
+            const r = borderRadius;
+            this.ctx.moveTo(x + r, y);
+            this.ctx.lineTo(x + barWidth - r, y);
+            this.ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + r);
+            this.ctx.lineTo(x + barWidth, y + barHeight - r);
+            this.ctx.quadraticCurveTo(x + barWidth, y + barHeight, x + barWidth - r, y + barHeight);
+            this.ctx.lineTo(x + r, y + barHeight);
+            this.ctx.quadraticCurveTo(x, y + barHeight, x, y + barHeight - r);
+            this.ctx.lineTo(x, y + r);
+            this.ctx.quadraticCurveTo(x, y, x + r, y);
+        }
+        this.ctx.fill();
+        this.ctx.restore();
+        
+        const yCenter = y + barHeight / 2;
+        
+        // Speed
         const speedKmh = Math.round((d.vehicleSpeedMps || 0) * 3.6);
+        const speedDisplay = speedKmh >= 150 ? '150+' : `${speedKmh}`;
+        const speedText = `${speedDisplay} km/h`;
         
-        // Get gear
+        // Gear
         const gearMap = {
             'GEAR_PARK': 'P',
             'GEAR_DRIVE': 'D',
@@ -6107,137 +6382,223 @@ class VideoClipProcessor {
             'GEAR_NEUTRAL': 'N'
         };
         const gear = gearMap[d.gearState] || '--';
+        const gearText = `[${gear}]`;
         
-        // Get autopilot status
-        const apMap = {
-            'NONE': '',
-            'SELF_DRIVING': 'FSD',
-            'AUTOSTEER': 'AP',
-            'TACC': 'TACC'
-        };
-        const autopilot = apMap[d.autopilotState] || '';
-        const hasAutopilot = autopilot && d.autopilotState !== 'NONE';
+        // Steering bucket
+        const steeringAngle = Math.round(d.steeringWheelAngle || 0);
+        const steeringBucket = Math.round(steeringAngle / 10) * 10;
+        const autopilotState = d.autopilotState || 'NONE';
         
-        // Get accelerator percentage
+        // Accelerator bucket
         const accelPercent = Math.round(d.acceleratorPedalPosition || 0);
+        const accelBucket = Math.floor(accelPercent / 10) * 10;
         
-        // Prepare text elements
-        this.ctx.font = 'bold 20px Arial';
-        const speedText = `${speedKmh}`;
-        const unitText = 'km/h';
-        const gearText = gear;
-        
-        // Measure text widths
-        const speedWidth = this.ctx.measureText(speedText).width;
-        this.ctx.font = '14px Arial';
-        const unitWidth = this.ctx.measureText(unitText).width;
-        this.ctx.font = 'bold 20px Arial';
-        const gearWidth = this.ctx.measureText(gearText).width;
-        const apTextWidth = autopilot ? this.ctx.measureText(autopilot).width : 0;
-        const accelTextWidth = accelPercent > 0 ? this.ctx.measureText(`${accelPercent}%`).width : 0;
-        
-        // Calculate total width
-        let totalWidth = padding * 2;
-        // Speed + unit
-        totalWidth += speedWidth + 4 + unitWidth + spacing;
-        // Gear
-        totalWidth += gearWidth + spacing;
-        // Blinkers (always show both)
-        totalWidth += iconSize + spacing + iconSize + spacing;
-        // Autopilot icon + text (if active)
-        if (hasAutopilot) {
-            totalWidth += iconSize + 4 + apTextWidth + spacing;
-        }
-        // Accelerator icon + text
-        totalWidth += iconSize + (accelPercent > 0 ? 4 + accelTextWidth : 0) + spacing;
-        // Brake icon
-        totalWidth += iconSize;
-        
-        // Position
-        const x = (this.canvas.width - totalWidth) / 2;
-        const y = this.canvas.height - boxHeight - 16;
-        
-        // Draw semi-transparent background
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-        this.ctx.beginPath();
-        this.ctx.roundRect(x, y, totalWidth, boxHeight, 8);
-        this.ctx.fill();
-        
-        // Draw elements
-        let curX = x + padding;
-        const centerY = y + boxHeight / 2;
-        const iconY = centerY - iconSize / 2;
-        
-        // Speed
-        this.ctx.fillStyle = '#fff';
-        this.ctx.font = 'bold 20px Arial';
-        this.ctx.textAlign = 'left';
+        // Draw items (Using SCALED COORDINATES)
+        this.ctx.save();
+        this.ctx.font = `bold ${fontSize}px Arial, sans-serif`;
         this.ctx.textBaseline = 'middle';
-        this.ctx.fillText(speedText, curX, centerY);
-        curX += speedWidth + 4;
         
-        // Unit
-        this.ctx.font = '14px Arial';
-        this.ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        this.ctx.fillText(unitText, curX, centerY);
-        curX += unitWidth + spacing;
+        // Speed (Scaled at 125)
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.textAlign = 'right';
+        this.ctx.fillText(speedText, x + 125 * scale, yCenter);
         
-        // Gear
-        this.ctx.font = 'bold 20px Arial';
-        this.ctx.fillStyle = gear === 'R' ? '#ff4d4f' : (gear === 'D' ? '#52c41a' : '#fff');
-        this.ctx.fillText(gearText, curX, centerY);
-        curX += gearWidth + spacing;
-        
-        // Left blinker icon
-        if (icons) {
-            const leftBlinker = d.blinkerOnLeft ? icons.blinkerLeftActive : icons.blinkerLeftInactive;
-            this.ctx.drawImage(leftBlinker, curX, iconY, iconSize, iconSize);
-        }
-        curX += iconSize + spacing;
-        
-        // Right blinker icon
-        if (icons) {
-            const rightBlinker = d.blinkerOnRight ? icons.blinkerRightActive : icons.blinkerRightInactive;
-            this.ctx.drawImage(rightBlinker, curX, iconY, iconSize, iconSize);
-        }
-        curX += iconSize + spacing;
-        
-        // Autopilot icon + text (if active)
-        if (hasAutopilot && icons) {
-            this.ctx.drawImage(icons.autopilotActive, curX, iconY, iconSize, iconSize);
-            curX += iconSize + 4;
-            this.ctx.font = 'bold 14px Arial';
-            this.ctx.fillStyle = '#1890ff';
-            this.ctx.fillText(autopilot, curX, centerY);
-            curX += apTextWidth + spacing;
-        }
-        
-        // Accelerator icon + percentage
-        if (icons) {
-            const accelIcon = this.getAcceleratorIcon(accelPercent);
-            this.ctx.drawImage(accelIcon, curX, iconY, iconSize, iconSize);
-            curX += iconSize;
-            if (accelPercent > 0) {
-                curX += 4;
-                this.ctx.font = 'bold 14px Arial';
-                this.ctx.fillStyle = '#73d13d';
-                this.ctx.fillText(`${accelPercent}%`, curX, centerY);
-                curX += accelTextWidth;
-            }
-            curX += spacing;
-        }
-        
-        // Brake icon
-        if (icons) {
-            const brakeIcon = d.brakeApplied ? icons.brakeActive : icons.brakeInactive;
-            this.ctx.drawImage(brakeIcon, curX, iconY, iconSize, iconSize);
-        }
-        
-        // Reset text alignment
+        // Gear (Scaled at 145)
         this.ctx.textAlign = 'left';
-        this.ctx.textBaseline = 'alphabetic';
+        let gearColor = '#ffffff';
+        if (gear === 'D') gearColor = '#52c41a';
+        else if (gear === 'R') gearColor = '#ff4d4f';
+        this.ctx.fillStyle = gearColor;
+        this.ctx.fillText(gearText, x + 145 * scale, yCenter);
+        
+        // Blinkers
+        this.drawLeftArrow(this.ctx, x + 200 * scale, yCenter, iconSize, d.blinkerOnLeft);
+        this.drawRightArrow(this.ctx, x + 240 * scale, yCenter, iconSize, d.blinkerOnRight);
+        
+        // Accel
+        this.drawAcceleratorIcon(this.ctx, x + 290 * scale, yCenter, iconSize, accelBucket);
+        if (accelBucket > 0) {
+            this.ctx.fillStyle = '#52c41a';
+            this.ctx.fillText(`${accelBucket}%`, x + 325 * scale, yCenter);
+        }
+        
+        // Brake
+        this.drawBrakeIcon(this.ctx, x + 380 * scale, yCenter, iconSize, d.brakeApplied);
+        
+        // Steering Wheel
+        this.drawSteeringWheelIcon(this.ctx, x + 435 * scale, yCenter, iconSize, steeringBucket, autopilotState);
+        
+        this.ctx.restore();
     }
-    
+
+    // Helper: draw left arrow
+    drawLeftArrow(ctx, x, y, size, active) {
+        const color = active ? '#52c41a' : 'rgba(255,255,255,0.2)';
+        ctx.save();
+        if (active) {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = 'rgba(82, 196, 26, 0.4)';
+        }
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        const halfSize = size / 2;
+        ctx.moveTo(x + size * 0.9, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 1.1, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 1.1, y - halfSize * 0.8);
+        ctx.lineTo(x + size * 0.1, y);
+        ctx.lineTo(x + halfSize * 1.1, y + halfSize * 0.8);
+        ctx.lineTo(x + halfSize * 1.1, y + halfSize * 0.4);
+        ctx.lineTo(x + size * 0.9, y + halfSize * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // Helper: draw right arrow
+    drawRightArrow(ctx, x, y, size, active) {
+        const color = active ? '#52c41a' : 'rgba(255,255,255,0.2)';
+        ctx.save();
+        if (active) {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = 'rgba(82, 196, 26, 0.4)';
+        }
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        const halfSize = size / 2;
+        ctx.moveTo(x + size * 0.1, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 0.9, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 0.9, y - halfSize * 0.8);
+        ctx.lineTo(x + size * 0.9, y);
+        ctx.lineTo(x + halfSize * 0.9, y + halfSize * 0.8);
+        ctx.lineTo(x + halfSize * 0.9, y + halfSize * 0.4);
+        ctx.lineTo(x + size * 0.1, y + halfSize * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // Helper: draw brake icon
+    drawBrakeIcon(ctx, x, y, size, active) {
+        const color = active ? '#ff4d4f' : 'rgba(255,255,255,0.4)';
+        ctx.save();
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        const r = size / 2 - 2;
+        const cx = x + size / 2;
+        ctx.arc(cx, y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx, y, r * 0.5, 0, Math.PI * 2);
+        ctx.stroke();
+        if (active) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(cx, y, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    // Helper: draw accelerator icon
+    drawAcceleratorIcon(ctx, x, y, size, percent) {
+        const active = percent > 0;
+        const rectWidth = size * 0.6;
+        const rectHeight = size * 0.9;
+        const rectX = x + (size - rectWidth) / 2;
+        const rectY = y - rectHeight / 2;
+        const cornerRadius = 3;
+        
+        ctx.save();
+        ctx.strokeStyle = active ? '#52c41a' : 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 2;
+        this.drawRoundedRect(ctx, rectX, rectY, rectWidth, rectHeight, cornerRadius);
+        ctx.stroke();
+        
+        if (active) {
+            const fillHeight = (percent / 100) * (rectHeight - 4);
+            const fillY = rectY + rectHeight - 2 - fillHeight;
+            ctx.fillStyle = '#52c41a';
+            this.drawRoundedRect(ctx, rectX + 2, fillY, rectWidth - 4, fillHeight, 1);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    // Helper: draw steering wheel icon
+    drawSteeringWheelIcon(ctx, x, y, size, angle, autopilotState) {
+        let color = 'rgba(255,255,255,0.9)';
+        let shadowColor = 'transparent';
+        if (autopilotState === 'SELF_DRIVING') {
+            color = '#52c41a';
+            shadowColor = 'rgba(82, 196, 26, 0.5)';
+        } else if (autopilotState === 'AUTOSTEER' || autopilotState === 'TACC') {
+            color = '#1890ff';
+            shadowColor = 'rgba(24, 144, 255, 0.5)';
+        }
+        
+        ctx.save();
+        if (shadowColor !== 'transparent') {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = shadowColor;
+        }
+        
+        const cx = x + size / 2;
+        const cy = y;
+        ctx.translate(cx, cy);
+        ctx.rotate((angle * Math.PI) / 180);
+        
+        const scale = size / 64;
+        const r = 28 * scale;
+        const hubR = 9 * scale;
+        const strokeWidth = 5 * scale;
+        const spokeHeight = 8 * scale;
+        const spokeWidth = 19 * scale;
+        const spokeRx = 2 * scale;
+        
+        ctx.strokeStyle = color;
+        ctx.lineWidth = strokeWidth;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, 0, hubR, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Left spoke
+        this.drawRoundedRect(ctx, -r - strokeWidth / 2, -spokeHeight / 2, spokeWidth, spokeHeight, spokeRx);
+        ctx.fill();
+        // Right spoke
+        this.drawRoundedRect(ctx, r - spokeWidth + strokeWidth / 2, -spokeHeight / 2, spokeWidth, spokeHeight, spokeRx);
+        ctx.fill();
+        // Bottom spoke
+        this.drawRoundedRect(ctx, -spokeHeight / 2, hubR, spokeHeight, spokeWidth, spokeRx);
+        ctx.fill();
+        
+        ctx.restore();
+    }
+
+    // Helper: draw rounded rectangle
+    drawRoundedRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(x, y, width, height, radius);
+        } else {
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+    }
+
     parseTimestamp(timestamp) {
         // Handles "2024-01-01_12-00-00" format
         const [datePart, timePart] = timestamp.split('_');
