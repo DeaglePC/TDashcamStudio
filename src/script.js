@@ -451,7 +451,7 @@ class MetadataOverlayGenerator {
      * Generate a static background PNG for the overlay bar
      */
     async generateBackgroundPng() {
-        const barWidth = 480;
+        const barWidth = 430;
         const barHeight = 65;
         const canvas = document.createElement('canvas');
         canvas.width = barWidth;
@@ -494,7 +494,7 @@ class MetadataOverlayGenerator {
     async generateMetadataOverlayPng(data) {
         // We use a fixed height for the bar - increased size
         const barHeight = 65;
-        const barWidth = 480;
+        const barWidth = 433;
         const iconSize = 30;
 
         // Get values
@@ -549,18 +549,14 @@ class MetadataOverlayGenerator {
         this.drawRightArrow(ctx, 240, yCenter, iconSize, data.blinkerOnRight);
 
         // Accel / Power (Moved closer to blinkers)
-        // Use bucket value for icon fill and text display (10% granularity)
+        // Use bucket value for icon fill (10% granularity), no percentage text
         this.drawAcceleratorIcon(ctx, 290, yCenter, iconSize, accelBucket);
-        if (accelBucket > 0) {
-            ctx.fillStyle = '#52c41a';
-            ctx.fillText(`${accelBucket}%`, 325, yCenter);
-        }
 
-        // Brake (Fixed at 380)
-        this.drawBrakeIcon(ctx, 380, yCenter, iconSize, data.brakeApplied);
+        // Brake (Fixed at 335)
+        this.drawBrakeIcon(ctx, 335, yCenter, iconSize, data.brakeApplied);
 
-        // Steering Wheel (Fixed at 435) - color based on autopilot state
-        this.drawSteeringWheelIcon(ctx, 435, yCenter, iconSize, steeringBucket, autopilotState);
+        // Steering Wheel (Fixed at 385) - color based on autopilot state
+        this.drawSteeringWheelIcon(ctx, 385, yCenter, iconSize, steeringBucket, autopilotState);
         
         return new Promise((resolve) => {
             canvas.toBlob((blob) => {
@@ -6477,18 +6473,14 @@ class VideoClipProcessor {
         this.drawLeftArrow(this.ctx, x + 200 * scale, yCenter, iconSize, d.blinkerOnLeft);
         this.drawRightArrow(this.ctx, x + 240 * scale, yCenter, iconSize, d.blinkerOnRight);
         
-        // Accel
+        // Accel (no percentage text, only icon)
         this.drawAcceleratorIcon(this.ctx, x + 290 * scale, yCenter, iconSize, accelBucket);
-        if (accelBucket > 0) {
-            this.ctx.fillStyle = '#52c41a';
-            this.ctx.fillText(`${accelBucket}%`, x + 325 * scale, yCenter);
-        }
         
-        // Brake
-        this.drawBrakeIcon(this.ctx, x + 380 * scale, yCenter, iconSize, d.brakeApplied);
+        // Brake (Fixed at 335)
+        this.drawBrakeIcon(this.ctx, x + 335 * scale, yCenter, iconSize, d.brakeApplied);
         
-        // Steering Wheel
-        this.drawSteeringWheelIcon(this.ctx, x + 435 * scale, yCenter, iconSize, steeringBucket, autopilotState);
+        // Steering Wheel (Fixed at 385)
+        this.drawSteeringWheelIcon(this.ctx, x + 385 * scale, yCenter, iconSize, steeringBucket, autopilotState);
         
         this.ctx.restore();
     }
