@@ -327,7 +327,8 @@ class MetadataOverlayGenerator {
             if (navigator.userAgent.includes('Windows')) {
                 return "C\\\\:/Windows/Fonts/msyh.ttc";
             } else if (navigator.userAgent.includes('Mac')) {
-                return "/System/Library/Fonts/PingFang.ttc";
+                // Escape spaces for FFmpeg filter
+                return "/System/Library/Fonts/Hiragino\\ Sans\\ GB.ttc";
             } else {
                 return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
             }
@@ -975,7 +976,9 @@ class MetadataOverlayGenerator {
         
         for (let segIdx = 0; segIdx < clipSegments.length; segIdx++) {
             const clipSeg = clipSegments[segIdx];
-            totalVideoDuration += (clipSeg.clipDuration || 60);
+            const clipStart = clipSeg.clipStart || 0;
+            const clipEnd = clipSeg.clipEnd || (clipSeg.clipDuration || 60);
+            totalVideoDuration += (clipEnd - clipStart);
         }
 
         // Create a 1x1 transparent PNG for empty gaps
@@ -985,6 +988,11 @@ class MetadataOverlayGenerator {
         transCanvas.height = 1;
         const transBlob = await new Promise(r => transCanvas.toBlob(r));
         await tauri.fs.writeFile(transparentPngPath, new Uint8Array(await transBlob.arrayBuffer()));
+
+        // Debug: log pngPaths content
+        console.log(`[Metadata Overlay] pngPaths size: ${pngPaths.size}`);
+        const pngPathKeys = Array.from(pngPaths.keys()).slice(0, 10);
+        console.log(`[Metadata Overlay] First 10 pngPath keys:`, pngPathKeys);
 
         accumulatedTime = 0;
         let lastEndTime = 0;
@@ -998,12 +1006,32 @@ class MetadataOverlayGenerator {
             const clipEnd = clipSeg.clipEnd || (clipSeg.clipDuration || 60);
             const segmentDuration = clipEnd - clipStart;
             
-            if (segmentMetadata && segmentMetadata.metadata) {
+            console.log(`[Metadata Overlay] Segment ${segIdx}: clipStart=${clipStart}, clipEnd=${clipEnd}, duration=${segmentDuration}`);
+            console.log(`[Metadata Overlay] Segment ${segIdx}: hasMetadata=${!!segmentMetadata}, metadataCount=${segmentMetadata?.metadata?.length || 0}`);
+            
+            if (segmentMetadata && segmentMetadata.metadata && segmentMetadata.metadata.length > 0) {
                 const metadata = segmentMetadata.metadata;
+                console.log(`[Metadata Overlay] Segment ${segIdx}: metadata time range: ${metadata[0]?.time} to ${metadata[metadata.length-1]?.time}`);
                 
                 // Fixed 0.5 second update interval
                 const updateInterval = 0.5;
                 const numIntervals = Math.ceil(segmentDuration / updateInterval);
+                console.log(`[Metadata Overlay] Segment ${segIdx}: numIntervals=${numIntervals}`);
+                
+                // Track last valid metadata for fallback when no match found
+                let lastValidItem = metadata.find(m => m && m.data) || null;
+                let matchCount = 0;
+                
+                // Debug: log some metadata samples to verify data variety
+                const sampleIndices = [0, Math.floor(metadata.length/4), Math.floor(metadata.length/2), Math.floor(metadata.length*3/4), metadata.length-1];
+                console.log(`[Metadata Overlay] Sample metadata items:`);
+                for (const idx of sampleIndices) {
+                    const item = metadata[idx];
+                    if (item && item.data) {
+                        const key = this.getMetadataStateKey(item.data);
+                        console.log(`  [${idx}] time=${item.time?.toFixed(2)}, speed=${(item.data.vehicleSpeedMps*3.6).toFixed(1)}km/h, gear=${item.data.gearState}, key=${key}`);
+                    }
+                }
                 
                 for (let i = 0; i < numIntervals; i++) {
                     const intervalStart = clipStart + i * updateInterval;
@@ -1012,18 +1040,27 @@ class MetadataOverlayGenerator {
                     
                     if (intervalDuration <= 0) continue;
                     
-                    // Find the closest metadata item for this interval
+                    // Find the best metadata item for this interval
+                    // Priority: latest item <= intervalStart, then closest, then last valid
+                    let bestItem = null;
                     let closestItem = null;
                     let closestDist = Infinity;
                     for (const item of metadata) {
+                        if (!item || !item.data) continue;
                         const dist = Math.abs(item.time - intervalStart);
                         if (dist < closestDist) {
                             closestDist = dist;
                             closestItem = item;
                         }
+                        if (item.time <= intervalStart && (!bestItem || item.time > bestItem.time)) {
+                            bestItem = item;
+                        }
                     }
                     
-                    if (!closestItem || !closestItem.data) continue;
+                    const selectedItem = bestItem || closestItem || lastValidItem;
+                    if (!selectedItem || !selectedItem.data) continue;
+                    lastValidItem = selectedItem;
+                    matchCount++;
                     
                     const relativeStart = accumulatedTime + (intervalStart - clipStart);
                     
@@ -1033,30 +1070,58 @@ class MetadataOverlayGenerator {
                         concatLines.push(`duration ${(relativeStart - lastEndTime).toFixed(4)}`);
                     }
 
-                    const key = this.getMetadataStateKey(closestItem.data);
+                    const key = this.getMetadataStateKey(selectedItem.data);
                     const pngPath = pngPaths.get(key);
+                    
+                    // Debug: log first 5, last 5, and any key changes
+                    const isFirst5 = i < 5;
+                    const isLast5 = i >= numIntervals - 5;
+                    const prevKey = i > 0 ? this._lastLoggedKey : null;
+                    const keyChanged = prevKey && key !== prevKey;
+                    this._lastLoggedKey = key;
+                    
+                    if (isFirst5 || isLast5 || keyChanged) {
+                        console.log(`[Metadata Overlay] Interval ${i}: time=${intervalStart.toFixed(2)}, selectedTime=${selectedItem.time?.toFixed(2)}, key=${key}, pngPath=${pngPath ? 'found' : 'NOT FOUND'}`);
+                    }
+                    
                     if (pngPath) {
                         // FFmpeg concat demuxer needs forward slashes even on Windows
                         const safePath = pngPath.replace(/\\/g, '/').replace(/'/g, "'\\''");
                         concatLines.push(`file '${safePath}'`);
                         concatLines.push(`duration ${intervalDuration.toFixed(4)}`);
                         lastEndTime = relativeStart + intervalDuration;
+                    } else {
+                        // PNG not found for this key, use transparent placeholder but still advance time
+                        console.log(`[Metadata Overlay] PNG not found for key: ${key}, using transparent`);
+                        concatLines.push(`file '${safeTransPath}'`);
+                        concatLines.push(`duration ${intervalDuration.toFixed(4)}`);
+                        lastEndTime = relativeStart + intervalDuration;
                     }
                 }
+                console.log(`[Metadata Overlay] Segment ${segIdx}: matched ${matchCount} intervals`);
             }
-            accumulatedTime += (clipSeg.clipDuration || 60);
+            // Use actual clipped duration, not full segment duration
+            accumulatedTime += segmentDuration;
         }
 
-        // Fill remaining time
+        console.log(`[Metadata Overlay] Generated ${concatLines.length / 2} entries, lastEndTime: ${lastEndTime}, totalDuration: ${totalVideoDuration}`);
+        console.log(`[Metadata Overlay] Concat file content (first 10 lines):`, concatLines.slice(0, 20).join('\n'));
+        console.log(`[Metadata Overlay] Concat file content (last 10 lines):`, concatLines.slice(-20).join('\n'));
+
+        // FFmpeg concat demuxer requires entries to cover the full duration
         if (lastEndTime < totalVideoDuration) {
-            concatLines.push(`file '${safeTransPath}'`);
-            concatLines.push(`duration ${(totalVideoDuration - lastEndTime).toFixed(4)}`);
+            const remaining = totalVideoDuration - lastEndTime;
+            if (remaining > 0.001) {
+                console.log(`[Metadata Overlay] Filling remaining time: ${remaining.toFixed(4)}s`);
+                concatLines.push(`file '${safeTransPath}'`);
+                concatLines.push(`duration ${remaining.toFixed(4)}`);
+            }
         }
         
-        // Final line for concat demuxer bug
+        // Final line for concat demuxer bug - needs one last file entry without duration
+        // for images to ensure the last duration is respected
         if (concatLines.length > 0) {
             concatLines.push(`file '${safeTransPath}'`);
-            concatLines.push(`duration 0.1`);
         }
 
         await tauri.fs.writeFile(concatFilePath, new TextEncoder().encode(concatLines.join('\n')));
@@ -1133,7 +1198,7 @@ class AssSubtitleGenerator {
             if (navigator.userAgent.includes('Windows')) {
                 return 'Microsoft YaHei';
             } else if (navigator.userAgent.includes('Mac')) {
-                return 'PingFang SC';
+                return 'Hiragino Sans GB';
             }
         }
         return 'Arial';
@@ -4482,8 +4547,20 @@ class VideoClipProcessor {
             
             // Build filter chain
             let filterComplex = '';
-            let inputArgs = ['-f', 'concat', '-safe', '0', '-i', listPath];
+            let inputArgs = ['-fflags', '+genpts', '-f', 'concat', '-safe', '0', '-i', listPath];
+            
+            console.log(`[FFmpeg] Exporting ${camera}, calculated duration: ${totalDuration}s`);
+
             let currentLabel = '[0:v]';
+            
+            // Normalize video stream if we are re-encoding (timestamp or metadata enabled)
+            // This is CRITICAL to fix duration shortening issues caused by PTS gaps in concat demuxer
+            if (addTimestamp || addMetadata) {
+                // Use fps filter to fill gaps, setpts to ensure continuous timeline from 0
+                // and trim to force the expected duration.
+                filterComplex = `${currentLabel}fps=fps=30,setpts=PTS-STARTPTS,trim=duration=${totalDuration}[v_sync]`;
+                currentLabel = '[v_sync]';
+            }
             
             // Add timestamp filter if enabled
             if (addTimestamp) {
@@ -4501,39 +4578,22 @@ class VideoClipProcessor {
                 const clipStartTimeObj = new Date(firstSegTime.getTime() + clipSegments[0].clipStart * 1000);
                 const startEpoch = Math.floor(clipStartTimeObj.getTime() / 1000);
                 
-                console.log('[FFmpeg Timestamp Debug]', {
-                    fileName,
-                    fullTimestamp: fullTimestampMatch ? fullTimestampMatch[1] : null,
-                    segmentTimestamp: clipSegments[0].timestamp,
-                    firstSegTime: firstSegTime.toISOString(),
-                    clipStart: clipSegments[0].clipStart,
-                    clipStartTimeObj: clipStartTimeObj.toISOString(),
-                    startEpoch
-                });
-                
                 let fontOption = "";
-                let timeFormat = "";
                 if (navigator.userAgent.includes('Windows')) {
-                    // Windows: FFmpeg needs specific escaping
                     fontOption = "fontfile='C\\:/Windows/Fonts/msyh.ttc':";
-                    // For drawtext in a script file on Windows, colons in time format 
-                    // need triple backslashes to be preserved correctly through the parser
-                    timeFormat = "%Y-%m-%d %H\\\\\\:%M\\\\\\:%S";
                 } else if (navigator.userAgent.includes('Mac')) {
-                    fontOption = "fontfile='/System/Library/Fonts/PingFang.ttc':";
-                    timeFormat = "%Y-%m-%d %H\\:%M\\:%S";
-                } else {
-                    // Linux
-                    timeFormat = "%Y-%m-%d %H\\:%M\\:%S";
+                    // Escape spaces for FFmpeg filter
+                    fontOption = "fontfile='/System/Library/Fonts/Hiragino\\ Sans\\ GB.ttc':";
                 }
 
-                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}\\:${timeFormat}}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
-                filterComplex = `${currentLabel}${drawtext}[ts]`;
+                // FFmpeg pts:localtime only accepts 2 arguments (localtime and epoch timestamp)
+                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
+                filterComplex += (filterComplex ? ';' : '') + `${currentLabel}${drawtext}[ts]`;
                 currentLabel = '[ts]';
             }
             
             // Add PNG overlay filters for metadata
-            if (overlayInfo && overlayInfo.pngPaths && overlayInfo.pngPaths.size > 0) {
+            if (addMetadata && overlayInfo && overlayInfo.pngPaths && overlayInfo.pngPaths.size > 0) {
                 const overlayResult = await metadataOverlayGenerator.generateOverlayFilter(
                     allMetadata,
                     clipSegments,
@@ -4557,15 +4617,15 @@ class VideoClipProcessor {
                     // Overlay background then metadata stream
                     const xExpr = '(W-w)/2';
                     const yExpr = '(H*0.97-h/2)';
-                    // Trim looped background to match video duration, use eof_action=pass to prevent hanging
-                    const bgTrim = `[${bgIdx}:v]trim=duration=${totalDuration},setpts=PTS-STARTPTS[bg_trimmed]`;
-                    const ovPart = `${bgTrim};${currentLabel}[bg_trimmed]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[bg_v];[bg_v][${metaIdx}:v]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[ov]`;
                     
-                    if (filterComplex) {
-                        filterComplex += ';' + ovPart;
-                    } else {
-                        filterComplex = ovPart;
-                    }
+                    // Background and metadata streams also need synchronization
+                    const bgTrim = `[${bgIdx}:v]trim=duration=${totalDuration},setpts=PTS-STARTPTS[bg_trimmed]`;
+                    const metaSync = `[${metaIdx}:v]setpts=PTS-STARTPTS[meta_sync]`;
+                    
+                    // Apply overlays using synchronized streams
+                    const ovPart = `${bgTrim};${metaSync};${currentLabel}[bg_trimmed]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[bg_v];[bg_v][meta_sync]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[ov]`;
+                    
+                    filterComplex += (filterComplex ? ';' : '') + ovPart;
                     currentLabel = '[ov]';
                 }
             }
@@ -4575,6 +4635,8 @@ class VideoClipProcessor {
                 // With filters: need re-encode
                 // Use filter_complex_script to avoid command line length limits on Windows
                 const filterScriptPath = `${workDir}${pathSeparator}ffmpeg_filter_${timestamp}.txt`;
+                console.log('[FFmpeg] Filter complex content:', filterComplex);
+                console.log('[FFmpeg] Current label for -map:', currentLabel);
                 await fs.writeTextFile(filterScriptPath, filterComplex);
                 tempFiles.push(filterScriptPath);
 
@@ -4587,6 +4649,7 @@ class VideoClipProcessor {
                     '-preset', 'fast',
                     '-crf', '23',
                     '-c:a', 'aac',
+                    '-t', String(Math.ceil(totalDuration + 0.5)),
                     '-y',
                     outputPath
                 ];
@@ -4828,7 +4891,8 @@ class VideoClipProcessor {
                 if (navigator.userAgent.includes('Windows')) {
                     fontOption = "fontfile='C\\:/Windows/Fonts/msyh.ttc':";
                 } else if (navigator.userAgent.includes('Mac')) {
-                    fontOption = "fontfile='/System/Library/Fonts/PingFang.ttc':";
+                    // Escape spaces for FFmpeg filter
+                    fontOption = "fontfile='/System/Library/Fonts/Hiragino\\ Sans\\ GB.ttc':";
                 }
 
                 const drawLabel = `drawtext=${fontOption}text='${labelText}':x=10:y=10:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.5`;
@@ -4884,20 +4948,16 @@ class VideoClipProcessor {
                 const startEpoch = Math.floor(clipStartTimeObj.getTime() / 1000);
                 
                 let fontOption = "";
-                let timeFormat = "";
                 if (navigator.userAgent.includes('Windows')) {
                     fontOption = "fontfile='C\\:/Windows/Fonts/msyh.ttc':";
-                    // For drawtext in a script file on Windows, colons in time format 
-                    // need triple backslashes to be preserved correctly through the parser
-                    timeFormat = "%Y-%m-%d %H\\\\\\:%M\\\\\\:%S";
                 } else if (navigator.userAgent.includes('Mac')) {
-                    fontOption = "fontfile='/System/Library/Fonts/PingFang.ttc':";
-                    timeFormat = "%Y-%m-%d %H\\:%M\\:%S";
-                } else {
-                    timeFormat = "%Y-%m-%d %H\\:%M\\:%S";
+                    // Escape spaces for FFmpeg filter
+                    fontOption = "fontfile='/System/Library/Fonts/Hiragino\\ Sans\\ GB.ttc':";
                 }
                 
-                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}\\:${timeFormat}}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
+                // FFmpeg pts:localtime only accepts 2 arguments (localtime and epoch timestamp)
+                // Time format uses system locale default
+                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
                 filterComplex += (filterComplex ? ';' : '') + `[${currentOutput}]${drawtext}[ts]`;
                 currentOutput = 'ts';
             }
@@ -4936,12 +4996,13 @@ class VideoClipProcessor {
                     const xExpr = '(W-w)/2';
                     const yExpr = '(H*0.97-h/2)';
                     const currentLabelStr = `[${currentOutput}]`;
-                    // Scale and trim background to match video duration, then overlay
-                    // Use trim on looped background to prevent infinite stream
+                    
+                    // Ensure all streams start at PTS 0 and are synchronized
+                    const videoStream = `${currentLabelStr}setpts=PTS-STARTPTS[v_sync]`;
                     const bgScale = `[${bgIdx}:v]trim=duration=${totalDuration},setpts=PTS-STARTPTS,scale=${scaledBgWidth}:${scaledBgHeight}[bg_scaled]`;
-                    const metaScale = `[${metaIdx}:v]scale=${scaledBgWidth}:${scaledBgHeight}[meta_scaled]`;
-                    // eof_action=pass allows overlay to continue even if overlay stream ends
-                    const ovPart = `${bgScale};${metaScale};${currentLabelStr}[bg_scaled]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[bg_v];[bg_v][meta_scaled]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[ov]`;
+                    const metaScale = `[${metaIdx}:v]setpts=PTS-STARTPTS,scale=${scaledBgWidth}:${scaledBgHeight}[meta_scaled]`;
+                    
+                    const ovPart = `${videoStream};${bgScale};${metaScale};[v_sync][bg_scaled]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[bg_v];[bg_v][meta_scaled]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[ov]`;
                     
                     filterComplex += (filterComplex ? ';' : '') + ovPart;
                     currentOutput = 'ov';
@@ -4970,7 +5031,8 @@ class VideoClipProcessor {
                 outputPath
             ];
             
-            console.log('[FFmpeg Grid] Filter script content:', filterComplex.substring(0, 500));
+            console.log('[FFmpeg Grid] Filter script content (first 500):', filterComplex.substring(0, 500));
+            console.log('[FFmpeg Grid] Filter script content (last 500):', filterComplex.substring(filterComplex.length - 500));
             console.log('[FFmpeg Grid] Running with', activeCameras.length, 'cameras, duration:', totalDuration);
             console.log('[FFmpeg Grid] Args:', args.join(' '));
             progressCallback?.('FFmpeg 合成四宫格...');
