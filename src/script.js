@@ -453,7 +453,7 @@ class MetadataOverlayGenerator {
      * Generate a static background PNG for the overlay bar
      */
     async generateBackgroundPng() {
-        const barWidth = 430;
+        const barWidth = 440;
         const barHeight = 65;
         const canvas = document.createElement('canvas');
         canvas.width = barWidth;
@@ -496,7 +496,7 @@ class MetadataOverlayGenerator {
     async generateMetadataOverlayPng(data) {
         // We use a fixed height for the bar - increased size
         const barHeight = 65;
-        const barWidth = 433;
+        const barWidth = 440;
         const iconSize = 30;
 
         // Get values
@@ -6094,10 +6094,12 @@ class VideoClipProcessor {
                         }
                         
                         // Light sync: if other cameras drift too much, correct occasionally
+                        // Skip videos that have ended or if target time exceeds their duration
                         for (const video of Object.values(videos)) {
                             if (video === masterVideo) continue;
+                            if (video.ended || t >= video.duration) continue; // Skip ended videos
                             if (Math.abs(video.currentTime - t) > 0.15) {
-                                video.currentTime = t;
+                                video.currentTime = Math.min(t, video.duration - 0.1);
                             }
                         }
                         
