@@ -138,6 +138,112 @@ body {
     gap: 8px;
 }
 
+.header-actions-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.header-menu-btn {
+    display: none;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
+    transition: background-color 0.2s ease;
+    color: var(--text-header);
+}
+
+.header-menu-btn:hover {
+    background-color: var(--bg-header-button-hover);
+}
+
+.header-actions-group .btn-text {
+    display: none;
+}
+
+@media (max-width: 600px) {
+    .header-menu-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .header-actions-group {
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 8px;
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: 12px;
+        padding: 4px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-8px) scale(0.98);
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        z-index: 1000;
+        min-width: 170px;
+    }
+
+    .header-right.active .header-actions-group {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0) scale(1);
+    }
+
+    .header-actions-group button,
+    .header-actions-group a {
+        width: 100% !important;
+        height: 38px !important; /* 更精致的高度 */
+        border-radius: 8px !important;
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        padding: 0 10px !important;
+        background-color: transparent !important;
+        gap: 12px !important;
+        color: var(--text-primary) !important;
+        text-decoration: none !important;
+        border: none !important;
+        cursor: pointer !important;
+        font-size: 0.85rem !important; /* 稍微缩小字号 */
+        font-weight: normal !important; /* 统一样式，取消加粗 */
+        margin: 0 !important;
+        box-shadow: none !important;
+        min-width: 0 !important;
+        max-width: none !important;
+    }
+
+    .header-actions-group button:hover,
+    .header-actions-group a:hover {
+        background-color: var(--bg-tertiary) !important;
+    }
+
+    .header-actions-group .btn-icon {
+        font-size: 1.1rem;
+        width: 24px !important;
+        height: 24px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        flex-shrink: 0 !important;
+        margin: 0 !important;
+    }
+
+    .header-actions-group .btn-text {
+        display: block !important;
+        white-space: nowrap !important;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+}
+
 .main-header .theme-toggle-btn {
     font-size: 1.2rem;
     padding: 0;
@@ -153,7 +259,7 @@ body {
 
 .lang-toggle-btn {
     font-size: 1rem;
-    font-weight: bold;
+    font-weight: 500;
     color: var(--text-header);
     margin-left: 8px;
 }
@@ -598,6 +704,19 @@ body.dark-theme #eventFilter {
     background-color: var(--bg-tertiary);
     padding: 4px 8px;
     border-radius: 6px;
+}
+
+.video-type-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--bg-tertiary);
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    font-size: 1rem;
+    margin-right: 8px;
+    vertical-align: middle;
 }
 
 .sidebar-footer {
@@ -1123,7 +1242,7 @@ body.dark-theme #eventFilter {
     }
 }
 
-/* Small screens - overlay sidebar */
+    /* Small screens - overlay sidebar */
 @media (max-width: 768px) {
     .sidebar {
         position: absolute;
@@ -1135,12 +1254,15 @@ body.dark-theme #eventFilter {
         height: auto; /* Allow bottom:0 to control height */
         z-index: 1000;
         min-width: unset;
+        display: flex; /* Ensure it's a flex container */
+        flex-direction: column;
         
         /* Override desktop animation and use transform for overlay effect */
         margin-left: 0;
         transform: translateX(0);
         transition: transform 0.3s ease-in-out;
     }
+
 
     .sidebar.collapsed {
         /* Override desktop animation and use transform */
@@ -1173,6 +1295,72 @@ body.dark-theme #eventFilter {
         -webkit-text-fill-color: var(--text-primary) !important;
     }
 
+    /* Video list two-column layout on small screens */
+    .file-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+        padding: 12px;
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+
+    .video-card {
+        margin-bottom: 0;
+        display: flex;
+        flex-direction: column;
+        height: auto;
+        min-height: 140px;
+        background-color: var(--bg-secondary);
+    }
+
+    .video-thumbnail {
+        aspect-ratio: 16 / 9 !important;
+        flex-shrink: 0;
+        width: 100%;
+        height: auto;
+    }
+
+    .video-info {
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+        justify-content: flex-start;
+        min-height: 60px;
+    }
+
+    .video-time {
+        font-size: 0.75rem;
+        line-height: 1.4;
+        display: block; /* 改为 block 允许内联元素自然排列 */
+    }
+
+    .video-time .city-link {
+        display: inline; /* 允许与图标同行 */
+        color: #007bff;
+        font-weight: bold;
+    }
+
+    .video-type-tag {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background-color: var(--bg-tertiary);
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        font-size: 1rem;
+        margin-right: 6px;
+        margin-bottom: 4px; /* 换行时增加间距 */
+        vertical-align: middle;
+    }
+
+    .video-type {
+        display: none !important;
+    }
 }
 
 body.sidebar-collapsed .open-sidebar-btn {
