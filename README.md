@@ -17,72 +17,53 @@ A modern, browser-based viewer for your TeslaCam footage. Play all six camera an
 
 ## 🆚 Why choose TeslaCam Player?
 
-Compared to the original Tesla in-car player, this project provides more powerful features and a superior experience:
+Compared to the original Tesla Dashcam player, this project provides more powerful features and a superior experience:
 
-| Feature | Tesla In-Car Player | TeslaCam Player (This Project) |
-| :--- | :--- | :--- |
-| **Camera Support** | Only 4 channels (F/B/L/R) | **Full 6 channels** (including B-pillars) |
-| **Viewing Experience** | Limited to car screen | **Multi-device** (PC/Tablet/Mobile), clear large-screen view |
-| **Video Editing** | No editing, raw files only | **Precise visual clipping**, what you see is what you get |
-| **Exporting** | Hard to share raw segments | **One-click grid export** with real-time timestamp watermarks for easy sharing |
-| **Driving Data** | Basic playback | **Real-time dashboard** (Speed, Pedals, AP status, G-force, etc.) |
-| **Location** | Basic map display | **Map Integration** (Deep link to Google/Gaode maps) |
-| **Privacy** | - | **100% Local processing**, no cloud uploads |
+| Feature | Tesla In-Car Player | Raw PC Playback | TeslaCam Player (This Project) |
+| :--- | :--- | :--- | :--- |
+| **Sync Playback** | ✅ Supports 6 channels | ❌ Manual file opening, no sync | ✅ **Perfect 6-channel sync, intuitive layout** |
+| **Viewing Exp.** | Limited to car screen | Large screen, but messy file folders | **Multi-device**, large screen, organized events |
+| **Filtering** | Basic categories only | ❌ Manual search in thousands of folders | ✅ **Smart filtering by date, time, and event type** |
+| **Driving Data** | ✅ Supports metadata | ❌ Video only, no hidden data access | ✅ **Visual Dashboard: Speed, Pedals, AP, etc.** |
+| **Video Editing** | ❌ Not supported | ❌ Requires pro tools (FFmpeg/Premiere) | ✅ **Visual drag-and-drop, exported videos include metadata watermarks** |
+| **Easy Sharing** | ❌ Hard to share | ❌ Raw segments only, poor experience | ✅ **One-click Grid Export with time & driving info watermarks** |
+| **Map/Location** | Basic map display | ❌ No location data | ✅ **Street names + Deep link to Google/Gaode** |
+| **Privacy** | - | ✅ Local playback | ✅ **100% Local processing**, privacy first |
+
 
 ![Screenshot](./.github/assets/home.webp)
 
 
 ## ✨ Features
-   
+
 ### 🎥 Video Playback
-*   **Six-Camera Sync Playback**: View footage from all six cameras (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar) at once, perfectly synchronized in a 6-grid layout.
-*   **B-Pillar Camera Support**: Full support for Tesla's interior B-pillar cameras for comprehensive coverage.
-*   **Interactive PiP**: Click on any Picture-in-Picture view to make it the main video.
-*   **Playback Speed Control**: Watch footage at 0.5x, 1.0x, 1.5x, or 2.0x speed.
-*   **Real-Time Clock**: See the actual date and time of the recording as you play.
-*   **Keyboard Shortcuts**: Control playback with your keyboard (`Space` for play/pause).
+*   **Multi-Layout Sync**: Perfectly synchronized footage with multiple viewing modes: 6-grid full view, new 4-grid, old 4-grid, and single-camera full screen.
+*   **B-Pillar Support**: Full coverage including Tesla's interior B-pillar cameras.
+*   **Real-Time Dashboard**: Automatically parses SEI metadata to display speed, gear, steering angle, pedal status, Autopilot (AP/FSD) state, and GPS coordinates.
+*   **Smart Filtering**: Easily filter recordings by date, time, and event type (Recent, Saved, Sentry).
+*   **Map Integration**: View real-time street names and click to open the exact location on Google Maps or Gaode Maps.
+*   **Interactive Controls**: Picture-in-Picture switching, 0.5x - 2.0x playback speed, instant clip download, and keyboard shortcuts (`Space` for play/pause).
 
-### ✂️ Advanced Video Editing
-*   **Visual Clip Selection**: Drag blue handles on the progress bar to select precise start and end points.
-*   **Multi-Segment Processing**: Automatically handles clips spanning multiple 1-minute video files.
-*   **Confirm Button**: Separate clip selection from export action with a dedicated confirm button (✓) and visual feedback.
-*   **Flexible Export Options**:
-    - Select specific cameras to export (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar, or any combination)
-    - Add real-time timestamp watermarks showing exact recording time
-    - Merge camera views into a grid video (2x2 for 4 cameras, 2x3 for 6 cameras)
-    - Enhanced text visibility with double-sized fonts in grid mode (36px labels, 48px timestamps)
-*   **Smart Processing**: All timestamps remain accurate across multi-segment clips with automatic time calculation.
 
-### 🎨 Modern User Interface
-*   **Dual-Theme Interface**: Switch between light and dark modes. Automatically detects your system's preference!
-*   **Bilingual Support (EN/ZH)**: Complete interface translation in English and Chinese. Auto-detects browser language.
-*   **Beautiful Export Modal**: Purple gradient theme with modern card design, smooth animations, and hover effects.
-*   **Collapsible Sidebar**: Maximize video space by hiding the event list.
-*   **Intuitive Icons**: Scissors icon (✂️) for clipping, checkmark (✓) for confirmation.
-*   **Progress Visualization**: Gradient progress bars with glowing effects during export.
-
-### 📊 Vehicle Metadata Parsing
-*   **Real-Time Driving Data**: Automatically parses SEI metadata embedded in video streams to display speed, gear, steering angle, and pedal positions.
-*   **Safety & Assistance**: Shows turn signal status and Autopilot (AP/FSD) activation state.
-*   **Dynamics & Location**: Displays GPS coordinates, heading, and 3-axis acceleration (X/Y/Z).
-*   **Interactive Dashboard**: The metadata panel can be dragged anywhere on the screen and toggled with a single click.
-*   **Official Reference**: Metadata parsing logic is based on the official [Tesla Dashcam](https://github.com/teslamotors/dashcam) repository.
-
-> **Note:** Metadata is only available in videos recorded with **vehicle software version 2025.44.25.11 or later**.
+> **Note:** Vehicle metadata is only available in videos recorded with **vehicle software version 2025.44.25.11 or later**.
 
 ![Metadata Display 1](.github/assets/screenshot1.webp)
 ![Metadata Display 2](.github/assets/screenshot2.webp)
 
-### 🔍 Smart Features
-*   **Intuitive Filtering**: Easily filter recordings by date and event type (Recent, Saved, Sentry).
-*   **Map Integration**: Click on the event's city to view the location on Gaode Map or Google Maps.
-*   **Clip Download**: Download the currently playing video clip directly from the player.
-*   **Zero-Time Support**: Correctly handles clips starting from the beginning (0:00).
+### ✂️ Video Clipping & Export
 
-### 🔒 Privacy & Performance
-*   **100% Private**: All processing is done locally in your browser using Canvas API and MediaRecorder. Your files are never uploaded.
-*   **Pure Vanilla JavaScript**: No frameworks, optimized for performance.
-*   **Client-Side Rendering**: Real-time video processing with timestamp overlay directly in browser.
+*   **Visual Precision Clipping**: Drag blue handles on the progress bar to select precise start and end points for your clip.
+*   **Seamless Multi-Segment Merging**: Automatically handles clips that span across multiple 1-minute raw video files.
+*   **One-Click Grid Export**: Combine selected camera views into a grid video (2x2 or 2x3) with enhanced, high-readability labels.
+*   **Timestamp Watermarks**: Add real-time timestamp and driving information (speed, gear, AP status, etc.) overlays to your exported videos for comprehensive reference.
+*   **Flexible Configuration**: Choose specific camera combinations to export and get real-time visual progress feedback.
+
+### 🎨 Modern User Interface
+*   **Dual-Theme Support**: Sleek Light and Dark modes with automatic system detection.
+*   **Internationalization**: Full English and Chinese support, auto-detected from browser settings.
+*   **Premium Design**: Modern card-based layout with smooth animations and a stylish purple gradient theme.
+*   **Privacy & Performance**: 100% local processing in your browser (Canvas API & MediaRecorder). Your data never leaves your device.
+
 
 ## 🚀 How to Use
 
