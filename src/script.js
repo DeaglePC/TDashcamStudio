@@ -302,6 +302,11 @@ class MetadataOverlayGenerator {
             'TACC': 'TACC'
         };
         
+        // 预加载刹车踏板图标
+        this.brakeIconLoaded = false;
+        this.brakeIconImg = null;
+        this.loadBrakeIcon();
+        
         // Colors for FFmpeg (hex format)
         this.colors = {
             white: 'ffffff',
@@ -453,18 +458,18 @@ class MetadataOverlayGenerator {
      * Generate a static background PNG for the overlay bar
      */
     async generateBackgroundPng() {
-        const barWidth = 440;
+        const barWidth = 460;
         const barHeight = 65;
         const canvas = document.createElement('canvas');
         canvas.width = barWidth;
         canvas.height = barHeight;
         const ctx = canvas.getContext('2d');
         
-        // Glassmorphism effect background (70% transparent)
+        // Glassmorphism effect background (less transparent)
         ctx.save();
         const gradient = ctx.createLinearGradient(0, 0, 0, barHeight);
-        gradient.addColorStop(0, 'rgba(20, 20, 20, 0.3)');
-        gradient.addColorStop(1, 'rgba(5, 5, 5, 0.35)');
+        gradient.addColorStop(0, 'rgba(20, 20, 20, 0.5)');
+        gradient.addColorStop(1, 'rgba(5, 5, 5, 0.55)');
         ctx.fillStyle = gradient;
         
         ctx.beginPath();
@@ -496,10 +501,10 @@ class MetadataOverlayGenerator {
     async generateMetadataOverlayPng(data) {
         // We use a fixed height for the bar - increased size
         const barHeight = 65;
-        const barWidth = 440;
+        const barWidth = 460;
         const iconSize = 30;
 
-        // Get values
+        // Get values with fallbacks
         const speedKmh = Math.round((data.vehicleSpeedMps || 0) * 3.6);
         const speedDisplay = speedKmh >= 150 ? '150+' : `${speedKmh}`;
         const speedText = `${speedDisplay} km/h`;
@@ -531,7 +536,7 @@ class MetadataOverlayGenerator {
         ctx.textBaseline = 'middle';
         const yCenter = barHeight / 2;
         
-        // Layout: Speed -> Gear -> Blinkers -> Accel -> Brake -> Steering Wheel
+        // Layout: Speed -> Gear -> Blinkers -> Brake -> Accel -> Steering Wheel
         
         // Speed (Fixed area, right-aligned at 125)
         ctx.fillStyle = '#ffffff';
@@ -547,24 +552,28 @@ class MetadataOverlayGenerator {
         ctx.fillText(gearText, 145, yCenter);
 
         // Blinkers (Tightened gaps)
-        this.drawLeftArrow(ctx, 200, yCenter, iconSize, data.blinkerOnLeft);
-        this.drawRightArrow(ctx, 240, yCenter, iconSize, data.blinkerOnRight);
+        try { this.drawLeftArrow(ctx, 200, yCenter, iconSize, data.blinkerOnLeft); } catch (e) { console.error('[drawLeftArrow]', e); }
+        try { this.drawRightArrow(ctx, 240, yCenter, iconSize, data.blinkerOnRight); } catch (e) { console.error('[drawRightArrow]', e); }
 
-        // Accel / Power (Moved closer to blinkers)
+        // Brake (Fixed at 290)
+        try { this.drawBrakeIcon(ctx, 290, yCenter, iconSize, data.brakeApplied); } catch (e) { console.error('[drawBrakeIcon]', e); }
+
+        // Accel / Power (Fixed at 340)
         // Use bucket value for icon fill (10% granularity), no percentage text
-        this.drawAcceleratorIcon(ctx, 290, yCenter, iconSize, accelBucket);
+        try { this.drawAcceleratorIcon(ctx, 340, yCenter, iconSize, accelBucket); } catch (e) { console.error('[drawAcceleratorIcon]', e); }
 
-        // Brake (Fixed at 335)
-        this.drawBrakeIcon(ctx, 335, yCenter, iconSize, data.brakeApplied);
-
-        // Steering Wheel (Fixed at 385) - color based on autopilot state
-        this.drawSteeringWheelIcon(ctx, 385, yCenter, iconSize, steeringBucket, autopilotState);
+        // Steering Wheel (Fixed at 390) - color based on autopilot state
+        try { this.drawSteeringWheelIcon(ctx, 390, yCenter, iconSize, steeringBucket, autopilotState); } catch (e) { console.error('[drawSteeringWheelIcon]', e); }
         
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             canvas.toBlob((blob) => {
+                if (!blob) {
+                    reject(new Error('Failed to create PNG blob'));
+                    return;
+                }
                 blob.arrayBuffer().then(buffer => {
                     resolve({ data: new Uint8Array(buffer), width: barWidth, height: barHeight });
-                });
+                }).catch(reject);
             }, 'image/png');
         });
     }
@@ -723,38 +732,59 @@ class MetadataOverlayGenerator {
         ctx.restore();
     }
     
-    // Draw brake icon (circle with lines)
+    // 预加载刹车踏板SVG图标
+    loadBrakeIcon() {
+        const svgContent = `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M821.394 861.482H200.242c-23.709 0-44.013-20.191-45.124-44.975 0 0-30.555-129.896-30.044-166.228 0.325-23.102 15.23-164.3 15.23-164.3 2.449-27.739 18.019-48.258 42.686-48.258h646.233c24.667 0 44.357 21.769 43.759 48.258l14.579 163.622-22.043 166.906c-0.56 24.784-20.414 44.975-44.124 44.975z m24.716-358.364l0.292-10.498c0.23-8.275-6.452-15.059-14.85-15.059H186.497c-8.397 0-14.828 6.784-14.291 15.059l0.681 10.498c0.534 8.232 7.802 14.954 16.153 14.954h641.472c8.35 0 15.37-6.722 15.598-14.954z m8.739 81.304l0.296-10.264c0.233-8.091-6.628-14.724-15.248-14.724H177.735c-8.62 0-15.226 6.633-14.681 14.724l0.691 10.264c0.542 8.049 7.999 14.622 16.571 14.622H838.84c8.574 0 15.777-6.572 16.009-14.622z m6.172 79.506l0.298-10.038c0.235-7.912-6.747-14.399-15.516-14.399H172.234c-8.769 0-15.494 6.487-14.945 14.399l0.695 10.038c0.545 7.872 8.126 14.3 16.847 14.3h669.91c8.721 0 16.047-6.428 16.28-14.3z m-14.901 77.765l0.282-9.819c0.222-7.74-6.466-14.085-14.863-14.085H186.526c-8.397 0-14.841 6.345-14.322 14.085l0.659 9.819c0.517 7.701 7.772 13.989 16.123 13.989h641.548c8.351 0 15.365-6.288 15.586-13.989z m-8.749 76.081l0.267-9.608c0.21-7.573-6.189-13.781-14.222-13.781H206.385c-8.033 0-14.202 6.208-13.711 13.781l0.623 9.608c0.489 7.535 7.425 13.688 15.415 13.688h613.751c7.99 0.001 14.698-6.152 14.908-13.688z m1.869-378.856l36.038-94.167 21.623-119.775H785.183L752.749 356.56l-118.926 82.358H839.24z" fill="#ffffff"/></svg>`;
+        const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        this.brakeIconImg = new Image();
+        this.brakeIconImg.onload = () => {
+            this.brakeIconLoaded = true;
+            URL.revokeObjectURL(url);
+        };
+        this.brakeIconImg.src = url;
+    }
+    
+    // Draw brake icon (brake pedal shape from SVG image)
     drawBrakeIcon(ctx, x, y, size, active) {
-        const color = active ? '#ff4d4f' : 'rgba(255,255,255,0.2)';
-        
         ctx.save();
-        if (active) {
-            ctx.shadowBlur = 6;
-            ctx.shadowColor = 'rgba(255, 77, 79, 0.5)';
+        
+        try {
+            if (active) {
+                ctx.shadowBlur = 6;
+                ctx.shadowColor = 'rgba(255, 77, 79, 0.5)';
+            }
+            
+            // 绘制图标，居中对齐 - 使用较大尺寸
+            const iconSize = size * 1.5;
+            const iconX = x + (size - iconSize) / 2;
+            const iconY = y - iconSize / 2;
+            
+            // 使用Path2D绘制SVG路径
+            const color = active ? '#ff4d4f' : 'rgba(255,255,255,0.2)';
+            ctx.fillStyle = color;
+            
+            // SVG viewBox是0 0 1024 1024，路径实际范围约 x:140-880, y:162-861
+            // 需要调整偏移使其居中
+            const svgSize = 1024;
+            const pathWidth = 880 - 140; // 约740
+            const pathHeight = 861 - 162; // 约699
+            const pathCenterX = 140 + pathWidth / 2; // 约510
+            const pathCenterY = 162 + pathHeight / 2; // 约511
+            
+            const scale = iconSize / svgSize;
+            
+            // 将路径中心移到图标中心
+            ctx.translate(iconX + iconSize / 2, iconY + iconSize / 2);
+            ctx.scale(scale, scale);
+            ctx.translate(-pathCenterX, -pathCenterY);
+            
+            const path = new Path2D('M821.394 861.482H200.242c-23.709 0-44.013-20.191-45.124-44.975 0 0-30.555-129.896-30.044-166.228 0.325-23.102 15.23-164.3 15.23-164.3 2.449-27.739 18.019-48.258 42.686-48.258h646.233c24.667 0 44.357 21.769 43.759 48.258l14.579 163.622-22.043 166.906c-0.56 24.784-20.414 44.975-44.124 44.975z m24.716-358.364l0.292-10.498c0.23-8.275-6.452-15.059-14.85-15.059H186.497c-8.397 0-14.828 6.784-14.291 15.059l0.681 10.498c0.534 8.232 7.802 14.954 16.153 14.954h641.472c8.35 0 15.37-6.722 15.598-14.954z m8.739 81.304l0.296-10.264c0.233-8.091-6.628-14.724-15.248-14.724H177.735c-8.62 0-15.226 6.633-14.681 14.724l0.691 10.264c0.542 8.049 7.999 14.622 16.571 14.622H838.84c8.574 0 15.777-6.572 16.009-14.622z m6.172 79.506l0.298-10.038c0.235-7.912-6.747-14.399-15.516-14.399H172.234c-8.769 0-15.494 6.487-14.945 14.399l0.695 10.038c0.545 7.872 8.126 14.3 16.847 14.3h669.91c8.721 0 16.047-6.428 16.28-14.3z m-14.901 77.765l0.282-9.819c0.222-7.74-6.466-14.085-14.863-14.085H186.526c-8.397 0-14.841 6.345-14.322 14.085l0.659 9.819c0.517 7.701 7.772 13.989 16.123 13.989h641.548c8.351 0 15.365-6.288 15.586-13.989z m-8.749 76.081l0.267-9.608c0.21-7.573-6.189-13.781-14.222-13.781H206.385c-8.033 0-14.202 6.208-13.711 13.781l0.623 9.608c0.489 7.535 7.425 13.688 15.415 13.688h613.751c7.99 0.001 14.698-6.152 14.908-13.688z m1.869-378.856l36.038-94.167 21.623-119.775H785.183L752.749 356.56l-118.926 82.358H839.24z');
+            ctx.fill(path);
+        } catch (err) {
+            console.error('[drawBrakeIcon] Error:', err);
         }
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
-        ctx.lineWidth = 2.5;
-        const r = size / 2 - 2;
-        const cx = x + size / 2;
-        const cy = y;
         
-        // Outer circle
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.stroke();
-        
-        // Inner circle
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2);
-        ctx.stroke();
-        
-        if (active) {
-            ctx.beginPath();
-            ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-            ctx.fill();
-        }
         ctx.restore();
     }
     
@@ -942,17 +972,22 @@ class MetadataOverlayGenerator {
         let idx = 0;
         
         for (const [key, data] of uniqueStates) {
-            const result = await this.generateMetadataOverlayPng(data);
-            const pngPath = `${pngDir}${pathSeparator}overlay_${idx}.png`;
-            
-            await fs.writeFile(pngPath, result.data);
-            pngPaths.set(key, pngPath);
-            idx++;
-            
-            if (idx % 20 === 0) {
-                progressCallback?.(language === 'zh' ? `生成覆盖层 ${idx}/${uniqueStates.size}...` : `Generating overlay ${idx}/${uniqueStates.size}...`);
-                // Short sleep to yield main thread
-                await new Promise(r => setTimeout(r, 0));
+            try {
+                const result = await this.generateMetadataOverlayPng(data);
+                const pngPath = `${pngDir}${pathSeparator}overlay_${idx}.png`;
+                
+                await fs.writeFile(pngPath, result.data);
+                pngPaths.set(key, pngPath);
+                idx++;
+                
+                if (idx % 20 === 0) {
+                    progressCallback?.(language === 'zh' ? `生成覆盖层 ${idx}/${uniqueStates.size}...` : `Generating overlay ${idx}/${uniqueStates.size}...`);
+                    // Short sleep to yield main thread
+                    await new Promise(r => setTimeout(r, 0));
+                }
+            } catch (err) {
+                console.error(`[MetadataOverlay] Failed to generate PNG for key ${key}:`, err);
+                // Continue with next state instead of failing entirely
             }
         }
         
@@ -979,12 +1014,13 @@ class MetadataOverlayGenerator {
             totalVideoDuration += (clipEnd - clipStart);
         }
 
-        // Create a 1x1 transparent PNG for empty gaps
+        // Create a transparent PNG for empty gaps (same size as metadata overlay)
         const transparentPngPath = `${workDir}${pathSeparator}empty_transparent.png`;
         const transCanvas = document.createElement('canvas');
-        transCanvas.width = 1;
-        transCanvas.height = 1;
-        const transBlob = await new Promise(r => transCanvas.toBlob(r));
+        // Must match metadata overlay dimensions (460x65) for concat demuxer
+        transCanvas.width = 460;
+        transCanvas.height = 65;
+        const transBlob = await new Promise(r => transCanvas.toBlob(r, 'image/png'));
         await tauri.fs.writeFile(transparentPngPath, new Uint8Array(await transBlob.arrayBuffer()));
 
         // Debug: log pngPaths content
@@ -1456,7 +1492,8 @@ class MetadataManager {
                 blinkerLeft: document.getElementById('metaBlinkerLeft'),
                 blinkerRight: document.getElementById('metaBlinkerRight'),
                 brakeIcon: document.getElementById('metaBrakeIcon'),
-                brakeActiveGroup: document.getElementById('brakeActiveGroup'),
+                brakeActiveGroup: document.querySelector('#metaBrakeIcon .brake-active'),
+                brakeInactiveGroup: document.querySelector('#metaBrakeIcon .brake-inactive'),
                 acceleratorIcon: document.getElementById('metaAcceleratorIcon'),
                 accelFillRect: document.getElementById('accelFillRect'),
                 autopilot: document.getElementById('metaAutopilot'),
@@ -1718,11 +1755,8 @@ class MetadataManager {
         }
         v.acceleratorIcon.classList.toggle('active', accelPercent > 5);
         
-        // Update brake - show red active group when brake is applied
+        // Update brake - use CSS class to toggle active state
         const brakeApplied = d.brakeApplied || false;
-        if (v.brakeActiveGroup) {
-            v.brakeActiveGroup.setAttribute('opacity', brakeApplied ? 1 : 0);
-        }
         v.brakeIcon.classList.toggle('active', brakeApplied);
         
         // Update blinkers
@@ -3369,13 +3403,10 @@ class VideoClipProcessor {
                           stroke="${active ? '#52c41a' : 'rgba(255,255,255,0.5)'}" 
                           stroke-width="2" stroke-linejoin="round"/>
                 </svg>`,
-            // Brake icon (red when active)
+            // Brake icon (brake pedal - red when active)
             brake: (active) => `
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="${iconSize}" height="${iconSize}">
-                    <circle cx="24" cy="24" r="20" fill="none" stroke="${active ? '#ff4d4f' : 'rgba(255,255,255,0.4)'}" stroke-width="2"/>
-                    <circle cx="24" cy="24" r="10" fill="none" stroke="${active ? '#ff4d4f' : 'rgba(255,255,255,0.4)'}" stroke-width="2"/>
-                    <circle cx="24" cy="24" r="3" fill="${active ? '#ff4d4f' : 'rgba(255,255,255,0.4)'}"/>
-                    <path d="M8 14 C2 18, 2 30, 8 34" fill="none" stroke="${active ? '#ff4d4f' : 'rgba(255,255,255,0.4)'}" stroke-width="3" stroke-linecap="round"/>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="${iconSize}" height="${iconSize}">
+                    <path d="M821.394 861.482H200.242c-23.709 0-44.013-20.191-45.124-44.975 0 0-30.555-129.896-30.044-166.228 0.325-23.102 15.23-164.3 15.23-164.3 2.449-27.739 18.019-48.258 42.686-48.258h646.233c24.667 0 44.357 21.769 43.759 48.258l14.579 163.622-22.043 166.906c-0.56 24.784-20.414 44.975-44.124 44.975z m24.716-358.364l0.292-10.498c0.23-8.275-6.452-15.059-14.85-15.059H186.497c-8.397 0-14.828 6.784-14.291 15.059l0.681 10.498c0.534 8.232 7.802 14.954 16.153 14.954h641.472c8.35 0 15.37-6.722 15.598-14.954z m8.739 81.304l0.296-10.264c0.233-8.091-6.628-14.724-15.248-14.724H177.735c-8.62 0-15.226 6.633-14.681 14.724l0.691 10.264c0.542 8.049 7.999 14.622 16.571 14.622H838.84c8.574 0 15.777-6.572 16.009-14.622z m6.172 79.506l0.298-10.038c0.235-7.912-6.747-14.399-15.516-14.399H172.234c-8.769 0-15.494 6.487-14.945 14.399l0.695 10.038c0.545 7.872 8.126 14.3 16.847 14.3h669.91c8.721 0 16.047-6.428 16.28-14.3z m-14.901 77.765l0.282-9.819c0.222-7.74-6.466-14.085-14.863-14.085H186.526c-8.397 0-14.841 6.345-14.322 14.085l0.659 9.819c0.517 7.701 7.772 13.989 16.123 13.989h641.548c8.351 0 15.365-6.288 15.586-13.989z m-8.749 76.081l0.267-9.608c0.21-7.573-6.189-13.781-14.222-13.781H206.385c-8.033 0-14.202 6.208-13.711 13.781l0.623 9.608c0.489 7.535 7.425 13.688 15.415 13.688h613.751c7.99 0.001 14.698-6.152 14.908-13.688z m1.869-378.856l36.038-94.167 21.623-119.775H785.183L752.749 356.56l-118.926 82.358H839.24z" fill="${active ? '#ff4d4f' : 'rgba(255,255,255,0.3)'}"/>
                 </svg>`,
             // Accelerator/throttle icon (green fill based on percentage)
             accelerator: (percent) => {
@@ -6484,14 +6515,14 @@ class VideoClipProcessor {
         this.drawLeftArrow(this.ctx, x + 200 * scale, yCenter, iconSize, d.blinkerOnLeft);
         this.drawRightArrow(this.ctx, x + 240 * scale, yCenter, iconSize, d.blinkerOnRight);
         
-        // Accel (no percentage text, only icon)
-        this.drawAcceleratorIcon(this.ctx, x + 290 * scale, yCenter, iconSize, accelBucket);
+        // Brake (Fixed at 290)
+        this.drawBrakeIcon(this.ctx, x + 290 * scale, yCenter, iconSize, d.brakeApplied);
         
-        // Brake (Fixed at 335)
-        this.drawBrakeIcon(this.ctx, x + 335 * scale, yCenter, iconSize, d.brakeApplied);
+        // Accel (Fixed at 340, no percentage text, only icon)
+        this.drawAcceleratorIcon(this.ctx, x + 340 * scale, yCenter, iconSize, accelBucket);
         
-        // Steering Wheel (Fixed at 385)
-        this.drawSteeringWheelIcon(this.ctx, x + 385 * scale, yCenter, iconSize, steeringBucket, autopilotState);
+        // Steering Wheel (Fixed at 390)
+        this.drawSteeringWheelIcon(this.ctx, x + 390 * scale, yCenter, iconSize, steeringBucket, autopilotState);
         
         this.ctx.restore();
     }
@@ -6542,26 +6573,43 @@ class VideoClipProcessor {
         ctx.restore();
     }
 
-    // Helper: draw brake icon
+    // Helper: draw brake icon (brake pedal shape from SVG)
     drawBrakeIcon(ctx, x, y, size, active) {
         const color = active ? '#ff4d4f' : 'rgba(255,255,255,0.4)';
         ctx.save();
-        ctx.beginPath();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        const r = size / 2 - 2;
-        const cx = x + size / 2;
-        ctx.arc(cx, y, r, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(cx, y, r * 0.5, 0, Math.PI * 2);
-        ctx.stroke();
-        if (active) {
+        
+        try {
+            if (active) {
+                ctx.shadowBlur = 6;
+                ctx.shadowColor = 'rgba(255, 77, 79, 0.5)';
+            }
             ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(cx, y, 3, 0, Math.PI * 2);
-            ctx.fill();
+            
+            // 绘制图标，居中对齐 - 使用较大尺寸
+            const iconSize = size * 1.5;
+            const iconX = x + (size - iconSize) / 2;
+            const iconY = y - iconSize / 2;
+            
+            // SVG viewBox是0 0 1024 1024，路径实际范围约 x:140-880, y:162-861
+            const svgSize = 1024;
+            const pathWidth = 880 - 140;
+            const pathHeight = 861 - 162;
+            const pathCenterX = 140 + pathWidth / 2;
+            const pathCenterY = 162 + pathHeight / 2;
+            
+            const scale = iconSize / svgSize;
+            
+            // 将路径中心移到图标中心
+            ctx.translate(iconX + iconSize / 2, iconY + iconSize / 2);
+            ctx.scale(scale, scale);
+            ctx.translate(-pathCenterX, -pathCenterY);
+            
+            const path = new Path2D('M821.394 861.482H200.242c-23.709 0-44.013-20.191-45.124-44.975 0 0-30.555-129.896-30.044-166.228 0.325-23.102 15.23-164.3 15.23-164.3 2.449-27.739 18.019-48.258 42.686-48.258h646.233c24.667 0 44.357 21.769 43.759 48.258l14.579 163.622-22.043 166.906c-0.56 24.784-20.414 44.975-44.124 44.975z m24.716-358.364l0.292-10.498c0.23-8.275-6.452-15.059-14.85-15.059H186.497c-8.397 0-14.828 6.784-14.291 15.059l0.681 10.498c0.534 8.232 7.802 14.954 16.153 14.954h641.472c8.35 0 15.37-6.722 15.598-14.954z m8.739 81.304l0.296-10.264c0.233-8.091-6.628-14.724-15.248-14.724H177.735c-8.62 0-15.226 6.633-14.681 14.724l0.691 10.264c0.542 8.049 7.999 14.622 16.571 14.622H838.84c8.574 0 15.777-6.572 16.009-14.622z m6.172 79.506l0.298-10.038c0.235-7.912-6.747-14.399-15.516-14.399H172.234c-8.769 0-15.494 6.487-14.945 14.399l0.695 10.038c0.545 7.872 8.126 14.3 16.847 14.3h669.91c8.721 0 16.047-6.428 16.28-14.3z m-14.901 77.765l0.282-9.819c0.222-7.74-6.466-14.085-14.863-14.085H186.526c-8.397 0-14.841 6.345-14.322 14.085l0.659 9.819c0.517 7.701 7.772 13.989 16.123 13.989h641.548c8.351 0 15.365-6.288 15.586-13.989z m-8.749 76.081l0.267-9.608c0.21-7.573-6.189-13.781-14.222-13.781H206.385c-8.033 0-14.202 6.208-13.711 13.781l0.623 9.608c0.489 7.535 7.425 13.688 15.415 13.688h613.751c7.99 0.001 14.698-6.152 14.908-13.688z m1.869-378.856l36.038-94.167 21.623-119.775H785.183L752.749 356.56l-118.926 82.358H839.24z');
+            ctx.fill(path);
+        } catch (err) {
+            console.error('[drawBrakeIcon Web] Error:', err);
         }
+        
         ctx.restore();
     }
 
