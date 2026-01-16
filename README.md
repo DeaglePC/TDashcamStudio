@@ -33,8 +33,22 @@ Compared to the original Tesla Dashcam player, this project provides more powerf
 
 ![Screenshot](./.github/assets/home.webp)
 
+## 📺 Feature Showcase
+
+| Feature | Demonstration |
+| :--- | :--- |
+| **Quick Start**: Support folder drag-and-drop, plug and play | ![Quick Start](.github/assets/GIF/drop-open.webp) |
+| **Modern UI**: Dark/Light mode support with smooth animations | ![Modern UI](.github/assets/GIF/ui.gif) |
+| **Smart Filtering**: Locate events by date and type quickly | ![Smart Filtering](.github/assets/GIF/filter.gif) |
+| **Map Integration**: Street names & deep links to maps | ![Map Integration](.github/assets/GIF/map.webp) |
+| **Playback Speed**: Flexible 0.5x - 2.0x speed control | ![Playback Speed](.github/assets/GIF/speed.gif) |
+| **Driving Data**: Real-time display of speed, turn signals, accelerator depth, brake pedal, AP/FSD, steering angle, etc. | ![Driving Data](.github/assets/GIF/meta-data.webp) |
+| **Sync Playback**: Perfectly synced footage with multiple layouts | ![Sync Playback](.github/assets/GIF/play.webp) |
+| **Visual Clipping**: Drag-and-drop handles for precise export | ![Visual Clipping](.github/assets/GIF/export.webp) |
+| **Export Results**: Grid videos with driving data watermarks | ![Export Results](.github/assets/GIF/6-exported-play.webp) |
 
 ## ✨ Features
+
 
 ### 🎥 Video Playback
 *   **Multi-Layout Sync**: Perfectly synchronized footage with multiple viewing modes: 6-grid full view, new 4-grid, old 4-grid, and single-camera full screen.

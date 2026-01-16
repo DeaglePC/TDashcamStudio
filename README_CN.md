@@ -33,8 +33,22 @@
 
 ![Screenshot](./.github/assets/home.webp)
 
+## 📺 功能演示
+
+| 功能描述 | 效果演示 |
+| :--- | :--- |
+| **快速开始**：支持文件夹拖拽，插卡即看 | ![快速开始](.github/assets/GIF/drop-open.webp) |
+| **现代化 UI**：支持深色/浅色模式自动切换，交互丝滑 | ![现代化 UI](.github/assets/GIF/ui.gif) |
+| **智能筛选**：按日期、事件类型快速定位关键录像 | ![智能筛选](.github/assets/GIF/filter.gif) |
+| **地图集成**：显示具体街道，一键跳转高德/Google地图 | ![地图集成](.github/assets/GIF/map.webp) |
+| **倍速控制**：支持 0.5x - 2.0x 灵活变速播放 | ![倍速控制](.github/assets/GIF/speed.gif) |
+| **行车数据**：实时展示车速、转向灯、油门深度、刹车踏板、AP/FSD 及 方向盘角度等 | ![行车数据](.github/assets/GIF/meta-data.webp) |
+| **多镜头同步**：所有视角完美同步，布局自由切换 | ![多镜头同步](.github/assets/GIF/play.webp) |
+| **可视化剪辑**：进度条直接拖拽，导出所见即所得 | ![可视化剪辑](.github/assets/GIF/export.webp) |
+| **导出预览**：自动合成网格视频，自带行车数据水印 | ![导出预览](.github/assets/GIF/6-exported-play.webp) |
 
 ## ✨ 功能特性
+
 
 ### 🎥 视频播放
 *   **多视角布局切换**: 完美同步所有镜头画面，支持多种播放布局：6 宫格全视角、新版 4 宫格、旧版 4 宫格以及单个摄像头全屏播放。
