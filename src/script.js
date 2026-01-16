@@ -532,7 +532,7 @@ class MetadataOverlayGenerator {
         // NO BACKGROUND DRAWN HERE - IT WILL BE OVERLAID SEPARATELY IN FFMPEG
 
         // Draw items (Using FIXED COORDINATES to prevent jittering)
-        ctx.font = 'bold 24px Arial, sans-serif';
+        ctx.font = 'bold 24px "Noto Sans SC", Arial, sans-serif';
         ctx.textBaseline = 'middle';
         const yCenter = barHeight / 2;
         
@@ -5949,7 +5949,7 @@ class VideoClipProcessor {
                         const labelX = offsetX + 4;
                         const labelY = item.y + 4;
                         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                        this.ctx.font = 'bold 12px Arial';
+                        this.ctx.font = 'bold 12px "Noto Sans SC", Arial';
                         const lang = this.currentLanguage || 'zh';
                         const cameraNames = {
                             front: { en: 'Front', zh: '前视' },
@@ -5995,7 +5995,7 @@ class VideoClipProcessor {
                 const labelX = x + 4;
                 const labelY = y + 4;
                 this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                this.ctx.font = 'bold 12px Arial';
+                this.ctx.font = 'bold 12px "Noto Sans SC", Arial';
                 
                 const lang = this.currentLanguage || 'zh';
                 const cameraNames = {
@@ -6038,7 +6038,7 @@ class VideoClipProcessor {
                     hour12: false
                 }).replace(/\//g, '-');
                 
-                this.ctx.font = 'bold 20px Arial';
+                this.ctx.font = 'bold 20px "Noto Sans SC", Arial';
                 const textWidth = this.ctx.measureText(timeString).width;
                 const padding = 10;
                 const boxWidth = textWidth + padding * 2;
@@ -6322,7 +6322,7 @@ class VideoClipProcessor {
         const margin = 20 * scale;
         
         // Measure text width
-        this.ctx.font = `bold ${fontSize}px Arial`;
+        this.ctx.font = `bold ${fontSize}px "Noto Sans SC", Arial`;
         const textWidth = this.ctx.measureText(timeString).width;
         const boxWidth = textWidth + padding * 2;
         const x = this.canvas.width - boxWidth - margin;
@@ -6495,7 +6495,7 @@ class VideoClipProcessor {
         
         // Draw items (Using SCALED COORDINATES)
         this.ctx.save();
-        this.ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+        this.ctx.font = `bold ${fontSize}px "Noto Sans SC", Arial, sans-serif`;
         this.ctx.textBaseline = 'middle';
         
         // Speed (Scaled at 125)
@@ -8846,8 +8846,21 @@ class TeslaCamViewer {
     destroy() { if (this.multiCameraPlayer) this.multiCameraPlayer.cleanup(); }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+// Preload custom font for Canvas rendering
+async function preloadFonts() {
     try {
+        const font = new FontFace('Noto Sans SC', 'url(./assets/fonts/NotoSansSC-Light.ttf)');
+        await font.load();
+        document.fonts.add(font);
+        console.log('Font "Noto Sans SC" loaded successfully');
+    } catch (e) {
+        console.warn('Failed to load custom font, falling back to system fonts:', e);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        await preloadFonts();
         window.viewer = new TeslaCamViewer();
         window.addEventListener('beforeunload', () => { if (window.viewer) window.viewer.destroy(); });
         console.log('TeslaCam Player Initialized');
