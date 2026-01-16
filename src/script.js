@@ -25,8 +25,8 @@
         mapModalTitle: "View on Map",
         gaodeMap: "Gaode Map",
         googleMap: "Google Map",
-        revealFile: "Reveal File Path",
-        downloadFile: "Download Current File",
+        revealFile: "Show Path",
+        downloadFile: "Download",
         filePathAlertTitle: "Current Video File Path",
         copiedToClipboard: "Copied to clipboard",
         noFilePath: "Could not determine file path for the active camera.",
@@ -53,6 +53,7 @@
         clipEndTime: "End Time:",
         selectCameras: "Select Cameras:",
         addTimestamp: "Add Timestamp Watermark",
+        addMetadata: "Add Driving Data Overlay",
         mergeVideos: "Merge as Grid Video",
         startExport: "Start Export",
         cancel: "Cancel",
@@ -63,7 +64,7 @@
         selectClipRange: "Select clip range on progress bar first",
         selectAtLeastOneCamera: "Please select at least one camera",
         exportFailed: "Export failed: ",
-        metadata: "Metadata",
+        metadata: "Drive Data",
         loadingMetadata: "Loading...",
         noMetadata: "No metadata found",
         speed: "Speed",
@@ -90,7 +91,8 @@
         autopilotNone: "None",
         autopilotSelfDriving: "FSD",
         autopilotAutosteer: "Autosteer",
-        autopilotTACC: "TACC"
+        autopilotTACC: "TACC",
+        moreOptions: "More Options"
     },
     zh: {
         pageTitle: "TeslaCam 播放器",
@@ -118,8 +120,8 @@
         mapModalTitle: "在地图上查看",
         gaodeMap: "高德地图",
         googleMap: "谷歌地图",
-        revealFile: "显示文件路径",
-        downloadFile: "下载当前文件",
+        revealFile: "显示路径",
+        downloadFile: "下载视频",
         filePathAlertTitle: "当前视频文件路径",
         copiedToClipboard: "已复制到剪贴板",
         noFilePath: "无法获取当前摄像头的文件路径",
@@ -149,6 +151,7 @@
         clipEndTime: "结束时间:",
         selectCameras: "选择摄像头:",
         addTimestamp: "添加时间水印",
+        addMetadata: "添加行驶数据",
         mergeVideos: "合成四宫格视频",
         startExport: "开始导出",
         cancel: "取消",
@@ -159,7 +162,7 @@
         selectClipRange: "请先在进度条上选择剪辑范围",
         selectAtLeastOneCamera: "请至少选择一个摄像头",
         exportFailed: "导出失败: ",
-        metadata: "元数据",
+        metadata: "行车数据",
         loadingMetadata: "加载中...",
         noMetadata: "无元数据",
         speed: "速度",
@@ -185,7 +188,8 @@
         autopilotNone: "无",
         autopilotSelfDriving: "完全自动驾驶 (FSD)",
         autopilotAutosteer: "自动辅助转向",
-        autopilotTACC: "自适应巡航"
+        autopilotTACC: "自适应巡航",
+        moreOptions: "更多选项"
     }
 };
 
@@ -277,6 +281,1194 @@ class TauriFile {
 }
 // --- End Tauri Helper ---
 
+// ============================================================
+// Metadata Overlay Generator for FFmpeg (PNG icons + overlay filter)
+// ============================================================
+class MetadataOverlayGenerator {
+    constructor() {
+        // Gear mapping
+        this.gearMap = {
+            'GEAR_PARK': 'P',
+            'GEAR_DRIVE': 'D',
+            'GEAR_REVERSE': 'R',
+            'GEAR_NEUTRAL': 'N'
+        };
+        
+        // Autopilot mapping
+        this.autopilotMap = {
+            'NONE': '',
+            'SELF_DRIVING': 'FSD',
+            'AUTOSTEER': 'AP',
+            'TACC': 'TACC'
+        };
+        
+        // 预加载刹车踏板图标
+        this.brakeIconLoaded = false;
+        this.brakeIconImg = null;
+        this.loadBrakeIcon();
+        
+        // Colors for FFmpeg (hex format)
+        this.colors = {
+            white: 'ffffff',
+            gray: '808080',
+            green: '52c41a',
+            red: 'ff4d4f',
+            blue: '1890ff',
+            orange: 'ffa500',
+            dimGray: '606060'
+        };
+        
+        // Icon size for overlay
+        this.iconSize = 28;
+        this.iconSpacing = 8;
+        
+        // Cache for generated PNG icons
+        this.iconCache = new Map();
+    }
+    
+    /**
+     * Get font file path based on operating system
+     */
+    getFontPath() {
+        if (typeof navigator !== 'undefined') {
+            if (navigator.userAgent.includes('Windows')) {
+                return "C\\\\:/Windows/Fonts/msyh.ttc";
+            } else if (navigator.userAgent.includes('Mac')) {
+                // Escape spaces for FFmpeg filter
+                return "/System/Library/Fonts/Hiragino\\ Sans\\ GB.ttc";
+            } else {
+                return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+            }
+        }
+        return "";
+    }
+    
+    /**
+     * Generate SVG icon as data URL
+     */
+    getSvgDataUrl(svgContent) {
+        const encoded = encodeURIComponent(svgContent);
+        return `data:image/svg+xml,${encoded}`;
+    }
+    
+    /**
+     * Create SVG for left blinker arrow
+     */
+    createBlinkerLeftSvg(active, size = 28) {
+        const color = active ? '#52c41a' : 'rgba(255,255,255,0.3)';
+        const stroke = active ? '#52c41a' : 'rgba(255,255,255,0.5)';
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="${size}" height="${size}">
+            <path d="M20 8 L6 24 L20 40 L20 30 L42 30 L42 18 L20 18 Z" 
+                  fill="${color}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>
+        </svg>`;
+    }
+    
+    /**
+     * Create SVG for right blinker arrow
+     */
+    createBlinkerRightSvg(active, size = 28) {
+        const color = active ? '#52c41a' : 'rgba(255,255,255,0.3)';
+        const stroke = active ? '#52c41a' : 'rgba(255,255,255,0.5)';
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="${size}" height="${size}">
+            <path d="M28 8 L42 24 L28 40 L28 30 L6 30 L6 18 L28 18 Z" 
+                  fill="${color}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>
+        </svg>`;
+    }
+    
+    /**
+     * Create SVG for brake icon
+     */
+    createBrakeSvg(active, size = 28) {
+        const color = active ? '#ff4d4f' : 'rgba(255,255,255,0.4)';
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="${size}" height="${size}">
+            <circle cx="24" cy="24" r="20" fill="none" stroke="${color}" stroke-width="2"/>
+            <circle cx="24" cy="24" r="10" fill="none" stroke="${color}" stroke-width="2"/>
+            <circle cx="24" cy="24" r="3" fill="${color}"/>
+            <path d="M8 14 C2 18, 2 30, 8 34" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
+        </svg>`;
+    }
+    
+    /**
+     * Create SVG for accelerator/throttle icon
+     */
+    createAcceleratorSvg(percent, size = 28) {
+        const fillHeight = (percent / 100) * 20;
+        const yPos = 26 - fillHeight;
+        const color = percent > 0 ? '#73d13d' : 'rgba(255,255,255,0.4)';
+        const fillRect = percent > 0 ? `<rect x="10" y="${yPos}" width="12" height="${fillHeight}" rx="2" fill="#73d13d" opacity="0.9"/>` : '';
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${size}" height="${size}">
+            <rect x="8" y="4" width="16" height="24" rx="3" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>
+            <path d="M18 8 L13 16 L16 16 L14 24 L19 15 L16 15 L18 8 Z" fill="${color}"/>
+            ${fillRect}
+        </svg>`;
+    }
+    
+    /**
+     * Create SVG for autopilot/steering wheel icon
+     */
+    createAutopilotSvg(active, size = 28) {
+        const color = active ? '#1890ff' : 'rgba(255,255,255,0.6)';
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${size}" height="${size}">
+            <circle cx="32" cy="32" r="26" fill="none" stroke="${color}" stroke-width="4"/>
+            <circle cx="32" cy="32" r="8" fill="${color}"/>
+            <rect x="6" y="29" width="17" height="6" rx="2" fill="${color}"/>
+            <rect x="41" y="29" width="17" height="6" rx="2" fill="${color}"/>
+            <rect x="29" y="41" width="6" height="17" rx="2" fill="${color}"/>
+        </svg>`;
+    }
+    
+    /**
+     * Convert SVG to PNG using Canvas and return as base64
+     */
+    async svgToPngBase64(svgContent, size = 28) {
+        return new Promise((resolve, reject) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            const img = new Image();
+            const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            
+            img.onload = () => {
+                ctx.drawImage(img, 0, 0, size, size);
+                URL.revokeObjectURL(url);
+                // Get PNG as base64 (without data:image/png;base64, prefix)
+                const dataUrl = canvas.toDataURL('image/png');
+                const base64 = dataUrl.split(',')[1];
+                resolve(base64);
+            };
+            
+            img.onerror = () => {
+                URL.revokeObjectURL(url);
+                reject(new Error('Failed to load SVG'));
+            };
+            
+            img.src = url;
+        });
+    }
+    
+    /**
+     * Generate a complete metadata overlay PNG for a single frame
+     * Uses bucket values for display to match the state key
+     * Returns PNG as Uint8Array
+     */
+    /**
+     * Generate a static background PNG for the overlay bar
+     */
+    async generateBackgroundPng() {
+        const barWidth = 460;
+        const barHeight = 65;
+        const canvas = document.createElement('canvas');
+        canvas.width = barWidth;
+        canvas.height = barHeight;
+        const ctx = canvas.getContext('2d');
+        
+        // Glassmorphism effect background (less transparent)
+        ctx.save();
+        const gradient = ctx.createLinearGradient(0, 0, 0, barHeight);
+        gradient.addColorStop(0, 'rgba(20, 20, 20, 0.5)');
+        gradient.addColorStop(1, 'rgba(5, 5, 5, 0.55)');
+        ctx.fillStyle = gradient;
+        
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(0, 0, barWidth, barHeight, 16);
+        } else {
+            const r = 16;
+            ctx.moveTo(r, 0); ctx.lineTo(barWidth - r, 0); ctx.quadraticCurveTo(barWidth, 0, barWidth, r);
+            ctx.lineTo(barWidth, barHeight - r); ctx.quadraticCurveTo(barWidth, barHeight, barWidth - r, barHeight);
+            ctx.lineTo(r, barHeight); ctx.quadraticCurveTo(0, barHeight, 0, barHeight - r);
+            ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
+        }
+        ctx.fill();
+        ctx.restore();
+        
+        return new Promise((resolve) => {
+            canvas.toBlob((blob) => {
+                blob.arrayBuffer().then(buffer => {
+                    resolve({ data: new Uint8Array(buffer), width: barWidth, height: barHeight });
+                });
+            }, 'image/png');
+        });
+    }
+
+    /**
+     * Generate a complete metadata overlay PNG for a single frame
+     * Returns an object { data: Uint8Array, width, height }
+     */
+    async generateMetadataOverlayPng(data) {
+        // We use a fixed height for the bar - increased size
+        const barHeight = 65;
+        const barWidth = 460;
+        const iconSize = 30;
+
+        // Get values with fallbacks
+        const speedKmh = Math.round((data.vehicleSpeedMps || 0) * 3.6);
+        const speedDisplay = speedKmh >= 150 ? '150+' : `${speedKmh}`;
+        const speedText = `${speedDisplay} km/h`;
+        
+        const gear = this.gearMap[data.gearState] || '--';
+        const gearText = `[${gear}]`;
+        
+        // Autopilot state for steering wheel color
+        const autopilotState = data.autopilotState || 'NONE';
+        
+        // Accelerator: use 10% bucket for both display and icon to match state key
+        const accelPercent = Math.round(data.acceleratorPedalPosition || 0);
+        const accelBucket = Math.floor(accelPercent / 10) * 10;
+        
+        // Steering angle: use 10° bucket to match state key
+        const steeringAngle = Math.round(data.steeringWheelAngle || 0);
+        const steeringBucket = Math.round(steeringAngle / 10) * 10;
+
+        // Create actual canvas for drawing
+        const canvas = document.createElement('canvas');
+        canvas.width = barWidth;
+        canvas.height = barHeight;
+        const ctx = canvas.getContext('2d');
+        
+        // NO BACKGROUND DRAWN HERE - IT WILL BE OVERLAID SEPARATELY IN FFMPEG
+
+        // Draw items (Using FIXED COORDINATES to prevent jittering)
+        ctx.font = 'bold 24px "Noto Sans SC", Arial, sans-serif';
+        ctx.textBaseline = 'middle';
+        const yCenter = barHeight / 2;
+        
+        // Layout: Speed -> Gear -> Blinkers -> Brake -> Accel -> Steering Wheel
+        
+        // Speed (Fixed area, right-aligned at 125)
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'right';
+        ctx.fillText(speedText, 125, yCenter);
+        
+        // Gear (Fixed at 145)
+        ctx.textAlign = 'left';
+        let gearColor = '#ffffff';
+        if (gear === 'D') gearColor = '#52c41a';
+        else if (gear === 'R') gearColor = '#ff4d4f';
+        ctx.fillStyle = gearColor;
+        ctx.fillText(gearText, 145, yCenter);
+
+        // Blinkers (Tightened gaps)
+        try { this.drawLeftArrow(ctx, 200, yCenter, iconSize, data.blinkerOnLeft); } catch (e) { console.error('[drawLeftArrow]', e); }
+        try { this.drawRightArrow(ctx, 240, yCenter, iconSize, data.blinkerOnRight); } catch (e) { console.error('[drawRightArrow]', e); }
+
+        // Brake (Fixed at 290)
+        try { this.drawBrakeIcon(ctx, 290, yCenter, iconSize, data.brakeApplied); } catch (e) { console.error('[drawBrakeIcon]', e); }
+
+        // Accel / Power (Fixed at 340)
+        // Use bucket value for icon fill (10% granularity), no percentage text
+        try { this.drawAcceleratorIcon(ctx, 340, yCenter, iconSize, accelBucket); } catch (e) { console.error('[drawAcceleratorIcon]', e); }
+
+        // Steering Wheel (Fixed at 390) - color based on autopilot state
+        try { this.drawSteeringWheelIcon(ctx, 390, yCenter, iconSize, steeringBucket, autopilotState); } catch (e) { console.error('[drawSteeringWheelIcon]', e); }
+        
+        return new Promise((resolve, reject) => {
+            canvas.toBlob((blob) => {
+                if (!blob) {
+                    reject(new Error('Failed to create PNG blob'));
+                    return;
+                }
+                blob.arrayBuffer().then(buffer => {
+                    resolve({ data: new Uint8Array(buffer), width: barWidth, height: barHeight });
+                }).catch(reject);
+            }, 'image/png');
+        });
+    }
+    
+    // Draw left arrow icon using Canvas
+    drawLeftArrow(ctx, x, y, size, active) {
+        const color = active ? '#52c41a' : 'rgba(255,255,255,0.2)';
+        const shadowColor = active ? 'rgba(82, 196, 26, 0.4)' : 'transparent';
+        
+        ctx.save();
+        if (active) {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = shadowColor;
+        }
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        const halfSize = size / 2;
+        // More stylish arrow
+        ctx.moveTo(x + size * 0.9, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 1.1, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 1.1, y - halfSize * 0.8);
+        ctx.lineTo(x + size * 0.1, y);
+        ctx.lineTo(x + halfSize * 1.1, y + halfSize * 0.8);
+        ctx.lineTo(x + halfSize * 1.1, y + halfSize * 0.4);
+        ctx.lineTo(x + size * 0.9, y + halfSize * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+    
+    // Draw right arrow icon using Canvas
+    drawRightArrow(ctx, x, y, size, active) {
+        const color = active ? '#52c41a' : 'rgba(255,255,255,0.2)';
+        const shadowColor = active ? 'rgba(82, 196, 26, 0.4)' : 'transparent';
+        
+        ctx.save();
+        if (active) {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = shadowColor;
+        }
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        const halfSize = size / 2;
+        // More stylish arrow
+        ctx.moveTo(x + size * 0.1, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 0.9, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 0.9, y - halfSize * 0.8);
+        ctx.lineTo(x + size * 0.9, y);
+        ctx.lineTo(x + halfSize * 0.9, y + halfSize * 0.8);
+        ctx.lineTo(x + halfSize * 0.9, y + halfSize * 0.4);
+        ctx.lineTo(x + size * 0.1, y + halfSize * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+    
+    // Draw autopilot icon (steering wheel)
+    drawAutopilotIcon(ctx, x, y, size) {
+        ctx.save();
+        ctx.strokeStyle = '#1890ff';
+        ctx.fillStyle = '#1890ff';
+        ctx.lineWidth = 2.5;
+        const r = size / 2 - 2;
+        const cx = x + size / 2;
+        const cy = y;
+        
+        // Outer circle with glow
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = 'rgba(24, 144, 255, 0.5)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Center dot
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Spokes (more like a Tesla steering wheel)
+        ctx.beginPath();
+        ctx.moveTo(cx - r + 3, cy);
+        ctx.lineTo(cx - 4, cy);
+        ctx.moveTo(cx + 4, cy);
+        ctx.lineTo(cx + r - 3, cy);
+        ctx.moveTo(cx, cy + 4);
+        ctx.lineTo(cx, cy + r - 3);
+        ctx.stroke();
+        ctx.restore();
+    }
+    
+    // Draw accelerator icon (rectangle with fill level like web version)
+    drawAcceleratorIcon(ctx, x, y, size, percent) {
+        const active = percent > 0;
+        
+        ctx.save();
+        
+        // Rectangle dimensions
+        const rectWidth = size * 0.6;
+        const rectHeight = size * 0.9;
+        const rectX = x + (size - rectWidth) / 2;
+        const rectY = y - rectHeight / 2;
+        const cornerRadius = 3;
+        
+        // Draw outer rectangle border
+        ctx.strokeStyle = active ? '#52c41a' : 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(rectX, rectY, rectWidth, rectHeight, cornerRadius);
+        } else {
+            // Fallback for older browsers
+            ctx.moveTo(rectX + cornerRadius, rectY);
+            ctx.lineTo(rectX + rectWidth - cornerRadius, rectY);
+            ctx.quadraticCurveTo(rectX + rectWidth, rectY, rectX + rectWidth, rectY + cornerRadius);
+            ctx.lineTo(rectX + rectWidth, rectY + rectHeight - cornerRadius);
+            ctx.quadraticCurveTo(rectX + rectWidth, rectY + rectHeight, rectX + rectWidth - cornerRadius, rectY + rectHeight);
+            ctx.lineTo(rectX + cornerRadius, rectY + rectHeight);
+            ctx.quadraticCurveTo(rectX, rectY + rectHeight, rectX, rectY + rectHeight - cornerRadius);
+            ctx.lineTo(rectX, rectY + cornerRadius);
+            ctx.quadraticCurveTo(rectX, rectY, rectX + cornerRadius, rectY);
+        }
+        ctx.stroke();
+        
+        // Draw fill level from bottom
+        if (active && percent > 0) {
+            const fillHeight = (percent / 100) * (rectHeight - 4);
+            const fillY = rectY + rectHeight - 2 - fillHeight;
+            
+            ctx.shadowBlur = 4;
+            ctx.shadowColor = 'rgba(82, 196, 26, 0.5)';
+            ctx.fillStyle = '#52c41a';
+            ctx.beginPath();
+            if (ctx.roundRect) {
+                ctx.roundRect(rectX + 2, fillY, rectWidth - 4, fillHeight, Math.min(cornerRadius - 1, 2));
+            } else {
+                ctx.rect(rectX + 2, fillY, rectWidth - 4, fillHeight);
+            }
+            ctx.fill();
+        }
+        
+        // Draw small lightning bolt icon inside (smaller, at top)
+        const boltSize = size * 0.35;
+        const boltX = x + size / 2;
+        const boltY = rectY + boltSize / 2 + 3;
+        ctx.fillStyle = active ? '#ffffff' : 'rgba(255,255,255,0.4)';
+        ctx.beginPath();
+        ctx.moveTo(boltX + boltSize * 0.1, boltY - boltSize * 0.4);
+        ctx.lineTo(boltX - boltSize * 0.15, boltY + boltSize * 0.05);
+        ctx.lineTo(boltX + boltSize * 0.02, boltY + boltSize * 0.05);
+        ctx.lineTo(boltX - boltSize * 0.1, boltY + boltSize * 0.4);
+        ctx.lineTo(boltX + boltSize * 0.15, boltY - boltSize * 0.05);
+        ctx.lineTo(boltX - boltSize * 0.02, boltY - boltSize * 0.05);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.restore();
+    }
+    
+    // 预加载刹车踏板SVG图标
+    loadBrakeIcon() {
+        const svgContent = `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M821.394 861.482H200.242c-23.709 0-44.013-20.191-45.124-44.975 0 0-30.555-129.896-30.044-166.228 0.325-23.102 15.23-164.3 15.23-164.3 2.449-27.739 18.019-48.258 42.686-48.258h646.233c24.667 0 44.357 21.769 43.759 48.258l14.579 163.622-22.043 166.906c-0.56 24.784-20.414 44.975-44.124 44.975z m24.716-358.364l0.292-10.498c0.23-8.275-6.452-15.059-14.85-15.059H186.497c-8.397 0-14.828 6.784-14.291 15.059l0.681 10.498c0.534 8.232 7.802 14.954 16.153 14.954h641.472c8.35 0 15.37-6.722 15.598-14.954z m8.739 81.304l0.296-10.264c0.233-8.091-6.628-14.724-15.248-14.724H177.735c-8.62 0-15.226 6.633-14.681 14.724l0.691 10.264c0.542 8.049 7.999 14.622 16.571 14.622H838.84c8.574 0 15.777-6.572 16.009-14.622z m6.172 79.506l0.298-10.038c0.235-7.912-6.747-14.399-15.516-14.399H172.234c-8.769 0-15.494 6.487-14.945 14.399l0.695 10.038c0.545 7.872 8.126 14.3 16.847 14.3h669.91c8.721 0 16.047-6.428 16.28-14.3z m-14.901 77.765l0.282-9.819c0.222-7.74-6.466-14.085-14.863-14.085H186.526c-8.397 0-14.841 6.345-14.322 14.085l0.659 9.819c0.517 7.701 7.772 13.989 16.123 13.989h641.548c8.351 0 15.365-6.288 15.586-13.989z m-8.749 76.081l0.267-9.608c0.21-7.573-6.189-13.781-14.222-13.781H206.385c-8.033 0-14.202 6.208-13.711 13.781l0.623 9.608c0.489 7.535 7.425 13.688 15.415 13.688h613.751c7.99 0.001 14.698-6.152 14.908-13.688z m1.869-378.856l36.038-94.167 21.623-119.775H785.183L752.749 356.56l-118.926 82.358H839.24z" fill="#ffffff"/></svg>`;
+        const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        this.brakeIconImg = new Image();
+        this.brakeIconImg.onload = () => {
+            this.brakeIconLoaded = true;
+            URL.revokeObjectURL(url);
+        };
+        this.brakeIconImg.src = url;
+    }
+    
+    // Draw brake icon (brake pedal shape from SVG image)
+    drawBrakeIcon(ctx, x, y, size, active) {
+        ctx.save();
+        
+        try {
+            if (active) {
+                ctx.shadowBlur = 6;
+                ctx.shadowColor = 'rgba(255, 77, 79, 0.5)';
+            }
+            
+            // 绘制图标，居中对齐 - 使用较大尺寸
+            const iconSize = size * 1.5;
+            const iconX = x + (size - iconSize) / 2;
+            const iconY = y - iconSize / 2;
+            
+            // 使用Path2D绘制SVG路径
+            const color = active ? '#ff4d4f' : 'rgba(255,255,255,0.2)';
+            ctx.fillStyle = color;
+            
+            // SVG viewBox是0 0 1024 1024，路径实际范围约 x:140-880, y:162-861
+            // 需要调整偏移使其居中
+            const svgSize = 1024;
+            const pathWidth = 880 - 140; // 约740
+            const pathHeight = 861 - 162; // 约699
+            const pathCenterX = 140 + pathWidth / 2; // 约510
+            const pathCenterY = 162 + pathHeight / 2; // 约511
+            
+            const scale = iconSize / svgSize;
+            
+            // 将路径中心移到图标中心
+            ctx.translate(iconX + iconSize / 2, iconY + iconSize / 2);
+            ctx.scale(scale, scale);
+            ctx.translate(-pathCenterX, -pathCenterY);
+            
+            const path = new Path2D('M821.394 861.482H200.242c-23.709 0-44.013-20.191-45.124-44.975 0 0-30.555-129.896-30.044-166.228 0.325-23.102 15.23-164.3 15.23-164.3 2.449-27.739 18.019-48.258 42.686-48.258h646.233c24.667 0 44.357 21.769 43.759 48.258l14.579 163.622-22.043 166.906c-0.56 24.784-20.414 44.975-44.124 44.975z m24.716-358.364l0.292-10.498c0.23-8.275-6.452-15.059-14.85-15.059H186.497c-8.397 0-14.828 6.784-14.291 15.059l0.681 10.498c0.534 8.232 7.802 14.954 16.153 14.954h641.472c8.35 0 15.37-6.722 15.598-14.954z m8.739 81.304l0.296-10.264c0.233-8.091-6.628-14.724-15.248-14.724H177.735c-8.62 0-15.226 6.633-14.681 14.724l0.691 10.264c0.542 8.049 7.999 14.622 16.571 14.622H838.84c8.574 0 15.777-6.572 16.009-14.622z m6.172 79.506l0.298-10.038c0.235-7.912-6.747-14.399-15.516-14.399H172.234c-8.769 0-15.494 6.487-14.945 14.399l0.695 10.038c0.545 7.872 8.126 14.3 16.847 14.3h669.91c8.721 0 16.047-6.428 16.28-14.3z m-14.901 77.765l0.282-9.819c0.222-7.74-6.466-14.085-14.863-14.085H186.526c-8.397 0-14.841 6.345-14.322 14.085l0.659 9.819c0.517 7.701 7.772 13.989 16.123 13.989h641.548c8.351 0 15.365-6.288 15.586-13.989z m-8.749 76.081l0.267-9.608c0.21-7.573-6.189-13.781-14.222-13.781H206.385c-8.033 0-14.202 6.208-13.711 13.781l0.623 9.608c0.489 7.535 7.425 13.688 15.415 13.688h613.751c7.99 0.001 14.698-6.152 14.908-13.688z m1.869-378.856l36.038-94.167 21.623-119.775H785.183L752.749 356.56l-118.926 82.358H839.24z');
+            ctx.fill(path);
+        } catch (err) {
+            console.error('[drawBrakeIcon] Error:', err);
+        }
+        
+        ctx.restore();
+    }
+    
+    // Draw steering wheel icon with rotation and autopilot color (matches web version)
+    drawSteeringWheelIcon(ctx, x, y, size, angle, autopilotState) {
+        // Determine color based on autopilot state
+        let color = 'rgba(255,255,255,0.9)'; // Default: white
+        let shadowColor = 'transparent';
+        
+        if (autopilotState === 'SELF_DRIVING') {
+            color = '#52c41a'; // Green for full self-driving
+            shadowColor = 'rgba(82, 196, 26, 0.5)';
+        } else if (autopilotState === 'AUTOSTEER' || autopilotState === 'TACC') {
+            color = '#1890ff'; // Blue for autopilot/TACC
+            shadowColor = 'rgba(24, 144, 255, 0.5)';
+        }
+        
+        ctx.save();
+        
+        // Apply shadow for active states
+        if (shadowColor !== 'transparent') {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = shadowColor;
+        }
+        
+        // Move to center of icon and rotate
+        const cx = x + size / 2;
+        const cy = y;
+        ctx.translate(cx, cy);
+        ctx.rotate((angle * Math.PI) / 180);
+        
+        // Scale factor: SVG viewBox is 64x64, we scale to fit 'size'
+        const scale = size / 64;
+        const r = 28 * scale; // outer ring radius (from SVG: r="28")
+        const hubR = 9 * scale; // hub radius (from SVG: r="9")
+        const strokeWidth = 5 * scale;
+        const spokeHeight = 8 * scale;
+        const spokeWidth = 19 * scale;
+        const spokeRx = 2 * scale;
+        
+        // Draw outer ring (steering wheel rim)
+        ctx.strokeStyle = color;
+        ctx.lineWidth = strokeWidth;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Draw center hub circle
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, 0, hubR, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw three spokes as rounded rectangles (like web SVG)
+        ctx.fillStyle = color;
+        
+        // Left spoke: rect x="4" y="28" width="19" height="8" (centered at y=32)
+        // In our coordinate system (centered at 0,0): x from -28 to -9, y from -4 to +4
+        const leftSpokeX = -r - strokeWidth / 2;
+        const leftSpokeY = -spokeHeight / 2;
+        this.drawRoundedRect(ctx, leftSpokeX, leftSpokeY, spokeWidth, spokeHeight, spokeRx);
+        ctx.fill();
+        
+        // Right spoke: rect x="41" y="28" width="19" height="8"
+        // In our coordinate system: x from +9 to +28, y from -4 to +4
+        const rightSpokeX = r - spokeWidth + strokeWidth / 2;
+        const rightSpokeY = -spokeHeight / 2;
+        this.drawRoundedRect(ctx, rightSpokeX, rightSpokeY, spokeWidth, spokeHeight, spokeRx);
+        ctx.fill();
+        
+        // Bottom spoke: rect x="28" y="41" width="8" height="19"
+        // In our coordinate system: x from -4 to +4, y from +9 to +28
+        const bottomSpokeX = -spokeHeight / 2;
+        const bottomSpokeY = hubR;
+        this.drawRoundedRect(ctx, bottomSpokeX, bottomSpokeY, spokeHeight, spokeWidth, spokeRx);
+        ctx.fill();
+        
+        ctx.restore();
+    }
+    
+    // Helper: draw rounded rectangle
+    drawRoundedRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(x, y, width, height, radius);
+        } else {
+            // Fallback for older browsers
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+    }
+    
+    /**
+     * Generate unique key for metadata state (for caching overlay PNGs)
+     */
+    getMetadataStateKey(data) {
+        // Real speed (1 km/h granularity)
+        const speedKmh = Math.round((data.vehicleSpeedMps || 0) * 3.6);
+        
+        const gear = this.gearMap[data.gearState] || '--';
+        
+        // Accelerator bucket: 10% granularity (0, 10, 20, ..., 100) to reduce unique states
+        // while maintaining reasonable visual accuracy
+        const accelPercent = Math.round(data.acceleratorPedalPosition || 0);
+        const accelBucket = Math.floor(accelPercent / 10) * 10;
+        
+        // Steering angle bucket: 10° granularity to reduce unique states
+        const steeringAngle = Math.round(data.steeringWheelAngle || 0);
+        const steeringBucket = Math.round(steeringAngle / 10) * 10;
+        
+        return `${speedKmh}_${gear}_${data.blinkerOnLeft ? 1 : 0}_${data.blinkerOnRight ? 1 : 0}_${data.autopilotState || 'NONE'}_${accelBucket}_${data.brakeApplied ? 1 : 0}_${steeringBucket}`;
+    }
+    
+    /**
+     * Get display values from state key
+     */
+    parseStateKey(key) {
+        const parts = key.split('_');
+        return {
+            speedBucket: parseInt(parts[0]),
+            gear: parts[1],
+            blinkerLeft: parts[2] === '1',
+            blinkerRight: parts[3] === '1',
+            autopilotState: parts[4],
+            accelBucket: parseInt(parts[5]),
+            brakeApplied: parts[6] === '1',
+            steeringBucket: parseInt(parts[7] || '0')
+        };
+    }
+    
+    /**
+     * Generate all unique overlay PNGs needed for the video and save them
+     * Returns a map of stateKey -> pngPath, or null if too many unique states
+     */
+    async generateOverlayPngs(allMetadata, clipSegments, workDir, width = 1920, height = 1080, progressCallback = null, language = 'zh') {
+        const tauri = window.__TAURI__;
+        const fs = tauri.fs;
+        
+        const pathSeparator = workDir.includes('\\') ? '\\' : '/';
+        const timestamp = Date.now();
+        const pngDir = `${workDir}${pathSeparator}overlay_pngs_${timestamp}`;
+        
+        // Collect all unique metadata states first
+        const uniqueStates = new Map();
+        
+        for (const segMeta of allMetadata) {
+            if (!segMeta.metadata) continue;
+            for (const item of segMeta.metadata) {
+                if (!item.data) continue;
+                const key = this.getMetadataStateKey(item.data);
+                if (!uniqueStates.has(key)) {
+                    uniqueStates.set(key, item.data);
+                }
+            }
+        }
+        
+        // Limit the number of unique PNGs to avoid FFmpeg command line length issues
+        const MAX_UNIQUE_PNGS = 500;
+        if (uniqueStates.size > MAX_UNIQUE_PNGS) {
+            console.warn(`[MetadataOverlay] Too many unique states (${uniqueStates.size}), falling back to ASS subtitles`);
+            return null;
+        }
+        
+        progressCallback?.(language === 'zh' ? `生成 ${uniqueStates.size} 个元数据覆盖层...` : `Generating ${uniqueStates.size} metadata overlays...`);
+        
+        // Create directory for PNGs
+        await fs.mkdir(pngDir, { recursive: true });
+        
+        // Generate and save background PNG first
+        const bgResult = await this.generateBackgroundPng();
+        const bgPath = `${pngDir}${pathSeparator}background.png`;
+        await fs.writeFile(bgPath, bgResult.data);
+
+        // Generate PNG for each unique state
+        const pngPaths = new Map();
+        pngPaths.set('__background__', bgPath);
+        let idx = 0;
+        
+        for (const [key, data] of uniqueStates) {
+            try {
+                const result = await this.generateMetadataOverlayPng(data);
+                const pngPath = `${pngDir}${pathSeparator}overlay_${idx}.png`;
+                
+                await fs.writeFile(pngPath, result.data);
+                pngPaths.set(key, pngPath);
+                idx++;
+                
+                if (idx % 20 === 0) {
+                    progressCallback?.(language === 'zh' ? `生成覆盖层 ${idx}/${uniqueStates.size}...` : `Generating overlay ${idx}/${uniqueStates.size}...`);
+                    // Short sleep to yield main thread
+                    await new Promise(r => setTimeout(r, 0));
+                }
+            } catch (err) {
+                console.error(`[MetadataOverlay] Failed to generate PNG for key ${key}:`, err);
+                // Continue with next state instead of failing entirely
+            }
+        }
+        
+        return { pngDir, pngPaths };
+    }
+
+    /**
+     * Generate FFmpeg filter for metadata overlay using concat demuxer (STABLE & FAST)
+     */
+    async generateOverlayFilter(allMetadata, clipSegments, pngPaths, workDir, videoInputCount = 1) {
+        const pathSeparator = workDir.includes('\\') ? '\\' : '/';
+        const concatFilePath = `${workDir}${pathSeparator}metadata_concat.txt`;
+        const tauri = window.__TAURI__;
+        
+        // Build timeline of metadata changes
+        const timeline = [];
+        let accumulatedTime = 0;
+        let totalVideoDuration = 0;
+        
+        for (let segIdx = 0; segIdx < clipSegments.length; segIdx++) {
+            const clipSeg = clipSegments[segIdx];
+            const clipStart = clipSeg.clipStart || 0;
+            const clipEnd = clipSeg.clipEnd || (clipSeg.clipDuration || 60);
+            totalVideoDuration += (clipEnd - clipStart);
+        }
+
+        // Create a transparent PNG for empty gaps (same size as metadata overlay)
+        const transparentPngPath = `${workDir}${pathSeparator}empty_transparent.png`;
+        const transCanvas = document.createElement('canvas');
+        // Must match metadata overlay dimensions (460x65) for concat demuxer
+        transCanvas.width = 460;
+        transCanvas.height = 65;
+        const transBlob = await new Promise(r => transCanvas.toBlob(r, 'image/png'));
+        await tauri.fs.writeFile(transparentPngPath, new Uint8Array(await transBlob.arrayBuffer()));
+
+        // Debug: log pngPaths content
+        console.log(`[Metadata Overlay] pngPaths size: ${pngPaths.size}`);
+        const pngPathKeys = Array.from(pngPaths.keys()).slice(0, 10);
+        console.log(`[Metadata Overlay] First 10 pngPath keys:`, pngPathKeys);
+
+        accumulatedTime = 0;
+        let lastEndTime = 0;
+        let concatLines = [];
+        const safeTransPath = transparentPngPath.replace(/\\/g, '/').replace(/'/g, "'\\''");
+
+        for (let segIdx = 0; segIdx < clipSegments.length; segIdx++) {
+            const clipSeg = clipSegments[segIdx];
+            const segmentMetadata = allMetadata.find(m => m.segmentIndex === segIdx);
+            const clipStart = clipSeg.clipStart || 0;
+            const clipEnd = clipSeg.clipEnd || (clipSeg.clipDuration || 60);
+            const segmentDuration = clipEnd - clipStart;
+            
+            console.log(`[Metadata Overlay] Segment ${segIdx}: clipStart=${clipStart}, clipEnd=${clipEnd}, duration=${segmentDuration}`);
+            console.log(`[Metadata Overlay] Segment ${segIdx}: hasMetadata=${!!segmentMetadata}, metadataCount=${segmentMetadata?.metadata?.length || 0}`);
+            
+            if (segmentMetadata && segmentMetadata.metadata && segmentMetadata.metadata.length > 0) {
+                const metadata = segmentMetadata.metadata;
+                console.log(`[Metadata Overlay] Segment ${segIdx}: metadata time range: ${metadata[0]?.time} to ${metadata[metadata.length-1]?.time}`);
+                
+                // Fixed 0.5 second update interval
+                const updateInterval = 0.5;
+                const numIntervals = Math.ceil(segmentDuration / updateInterval);
+                console.log(`[Metadata Overlay] Segment ${segIdx}: numIntervals=${numIntervals}`);
+                
+                // Track last valid metadata for fallback when no match found
+                let lastValidItem = metadata.find(m => m && m.data) || null;
+                let matchCount = 0;
+                
+                // Debug: log some metadata samples to verify data variety
+                const sampleIndices = [0, Math.floor(metadata.length/4), Math.floor(metadata.length/2), Math.floor(metadata.length*3/4), metadata.length-1];
+                console.log(`[Metadata Overlay] Sample metadata items:`);
+                for (const idx of sampleIndices) {
+                    const item = metadata[idx];
+                    if (item && item.data) {
+                        const key = this.getMetadataStateKey(item.data);
+                        console.log(`  [${idx}] time=${item.time?.toFixed(2)}, speed=${(item.data.vehicleSpeedMps*3.6).toFixed(1)}km/h, gear=${item.data.gearState}, key=${key}`);
+                    }
+                }
+                
+                for (let i = 0; i < numIntervals; i++) {
+                    const intervalStart = clipStart + i * updateInterval;
+                    const intervalEnd = Math.min(clipStart + (i + 1) * updateInterval, clipEnd);
+                    const intervalDuration = intervalEnd - intervalStart;
+                    
+                    if (intervalDuration <= 0) continue;
+                    
+                    // Find the best metadata item for this interval
+                    // Priority: latest item <= intervalStart, then closest, then last valid
+                    let bestItem = null;
+                    let closestItem = null;
+                    let closestDist = Infinity;
+                    for (const item of metadata) {
+                        if (!item || !item.data) continue;
+                        const dist = Math.abs(item.time - intervalStart);
+                        if (dist < closestDist) {
+                            closestDist = dist;
+                            closestItem = item;
+                        }
+                        if (item.time <= intervalStart && (!bestItem || item.time > bestItem.time)) {
+                            bestItem = item;
+                        }
+                    }
+                    
+                    const selectedItem = bestItem || closestItem || lastValidItem;
+                    if (!selectedItem || !selectedItem.data) continue;
+                    lastValidItem = selectedItem;
+                    matchCount++;
+                    
+                    const relativeStart = accumulatedTime + (intervalStart - clipStart);
+                    
+                    // Fill gap before this interval if exists
+                    if (relativeStart > lastEndTime + 0.001) {
+                        concatLines.push(`file '${safeTransPath}'`);
+                        concatLines.push(`duration ${(relativeStart - lastEndTime).toFixed(4)}`);
+                    }
+
+                    const key = this.getMetadataStateKey(selectedItem.data);
+                    const pngPath = pngPaths.get(key);
+                    
+                    // Debug: log first 5, last 5, and any key changes
+                    const isFirst5 = i < 5;
+                    const isLast5 = i >= numIntervals - 5;
+                    const prevKey = i > 0 ? this._lastLoggedKey : null;
+                    const keyChanged = prevKey && key !== prevKey;
+                    this._lastLoggedKey = key;
+                    
+                    if (isFirst5 || isLast5 || keyChanged) {
+                        console.log(`[Metadata Overlay] Interval ${i}: time=${intervalStart.toFixed(2)}, selectedTime=${selectedItem.time?.toFixed(2)}, key=${key}, pngPath=${pngPath ? 'found' : 'NOT FOUND'}`);
+                    }
+                    
+                    if (pngPath) {
+                        // FFmpeg concat demuxer needs forward slashes even on Windows
+                        const safePath = pngPath.replace(/\\/g, '/').replace(/'/g, "'\\''");
+                        concatLines.push(`file '${safePath}'`);
+                        concatLines.push(`duration ${intervalDuration.toFixed(4)}`);
+                        lastEndTime = relativeStart + intervalDuration;
+                    } else {
+                        // PNG not found for this key, use transparent placeholder but still advance time
+                        console.log(`[Metadata Overlay] PNG not found for key: ${key}, using transparent`);
+                        concatLines.push(`file '${safeTransPath}'`);
+                        concatLines.push(`duration ${intervalDuration.toFixed(4)}`);
+                        lastEndTime = relativeStart + intervalDuration;
+                    }
+                }
+                console.log(`[Metadata Overlay] Segment ${segIdx}: matched ${matchCount} intervals`);
+            }
+            // Use actual clipped duration, not full segment duration
+            accumulatedTime += segmentDuration;
+        }
+
+        console.log(`[Metadata Overlay] Generated ${concatLines.length / 2} entries, lastEndTime: ${lastEndTime}, totalDuration: ${totalVideoDuration}`);
+        console.log(`[Metadata Overlay] Concat file content (first 10 lines):`, concatLines.slice(0, 20).join('\n'));
+        console.log(`[Metadata Overlay] Concat file content (last 10 lines):`, concatLines.slice(-20).join('\n'));
+
+        // FFmpeg concat demuxer requires entries to cover the full duration
+        if (lastEndTime < totalVideoDuration) {
+            const remaining = totalVideoDuration - lastEndTime;
+            if (remaining > 0.001) {
+                console.log(`[Metadata Overlay] Filling remaining time: ${remaining.toFixed(4)}s`);
+                concatLines.push(`file '${safeTransPath}'`);
+                concatLines.push(`duration ${remaining.toFixed(4)}`);
+            }
+        }
+        
+        // Final line for concat demuxer bug - needs one last file entry without duration
+        // for images to ensure the last duration is respected
+        if (concatLines.length > 0) {
+            concatLines.push(`file '${safeTransPath}'`);
+        }
+
+        await tauri.fs.writeFile(concatFilePath, new TextEncoder().encode(concatLines.join('\n')));
+
+        // FFmpeg position (center bottom 97%)
+        const xExpr = '(W-w)/2';
+        const yExpr = '(H*0.97-h/2)';
+
+        // Return the concat input and a SIMPLE overlay filter
+        return {
+            concatFile: concatFilePath,
+            filter: `overlay=x=${xExpr}:y=${yExpr}`,
+            inputIdx: videoInputCount // This will be the next input index
+        };
+    }
+}
+
+// ============================================================
+// ASS Subtitle Generator for FFmpeg Metadata Overlay (Fallback)
+// ============================================================
+class AssSubtitleGenerator {
+    constructor() {
+        // ASS style constants
+        this.styles = {
+            // Style for metadata display at bottom center
+            metadata: {
+                name: 'Metadata',
+                fontName: 'Microsoft YaHei',  // Will be overridden based on OS
+                fontSize: 26,
+                primaryColor: '&H00FFFFFF',   // White
+                outlineColor: '&H00000000',   // Black outline
+                backColor: '&H80000000',      // Semi-transparent black background
+                bold: 1,
+                outline: 2,
+                shadow: 0,
+                alignment: 2,  // Bottom center
+                marginV: 25
+            }
+        };
+        
+        // Gear mapping
+        this.gearMap = {
+            'GEAR_PARK': 'P',
+            'GEAR_DRIVE': 'D',
+            'GEAR_REVERSE': 'R',
+            'GEAR_NEUTRAL': 'N'
+        };
+        
+        // Autopilot mapping
+        this.autopilotMap = {
+            'NONE': '',
+            'SELF_DRIVING': 'FSD',
+            'AUTOSTEER': 'AP',
+            'TACC': 'TACC'
+        };
+        
+        // ASS colors in BGR format (&HBBGGRR)
+        this.colors = {
+            white: '&H00FFFFFF',
+            gray: '&H00808080',
+            green: '&H001AC452',      // #52C41A
+            red: '&H004F4DFF',         // #FF4D4F
+            blue: '&H00FF9018',        // #1890FF
+            orange: '&H0000A5FF',      // #FFA500
+            dimGray: '&H00606060'
+        };
+    }
+    
+    /**
+     * Get font name based on operating system
+     */
+    getFontName() {
+        if (typeof navigator !== 'undefined') {
+            if (navigator.userAgent.includes('Windows')) {
+                return 'Microsoft YaHei';
+            } else if (navigator.userAgent.includes('Mac')) {
+                return 'Hiragino Sans GB';
+            }
+        }
+        return 'Arial';
+    }
+    
+    /**
+     * Generate ASS header with styles
+     * @param {number} width - Video width
+     * @param {number} height - Video height
+     * @returns {string} ASS header
+     */
+    generateHeader(width = 1920, height = 1080) {
+        const fontName = this.getFontName();
+        const style = this.styles.metadata;
+        
+        return `[Script Info]
+Title: TeslaCam Metadata Overlay
+ScriptType: v4.00+
+PlayResX: ${width}
+PlayResY: ${height}
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: ${style.name},${fontName},${style.fontSize},${style.primaryColor},${style.primaryColor},${style.outlineColor},${style.backColor},${style.bold},0,0,0,100,100,0,0,3,${style.outline},${style.shadow},${style.alignment},10,10,${style.marginV},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+    }
+    
+    /**
+     * Format time for ASS (H:MM:SS.cc format)
+     * @param {number} seconds - Time in seconds
+     * @returns {string} Formatted time string
+     */
+    formatAssTime(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        const cs = Math.floor((seconds % 1) * 100);
+        return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+    }
+    
+    /**
+     * Create colored text with ASS tags
+     * @param {string} text - Text content
+     * @param {string} color - ASS color
+     * @returns {string} Colored text with ASS tags
+     */
+    colorText(text, color) {
+        return `{\\c${color}}${text}{\\c${this.colors.white}}`;
+    }
+    
+    /**
+     * Format metadata to display text with colors (no ASS drawing, reliable text only)
+     * @param {Object} data - Metadata object
+     * @param {string} lang - Language code ('en' or 'zh')
+     * @returns {string} Formatted display text with ASS color commands
+     */
+    formatMetadataText(data, lang = 'zh') {
+        if (!data) return '';
+        
+        const parts = [];
+        const c = this.colors;
+        
+        // Speed
+        const speedKmh = Math.round((data.vehicleSpeedMps || 0) * 3.6);
+        parts.push(`${speedKmh} km/h`);
+        
+        // Gear with color
+        const gear = this.gearMap[data.gearState] || '--';
+        let gearColor = c.white;
+        if (gear === 'D') gearColor = c.green;
+        else if (gear === 'R') gearColor = c.red;
+        parts.push(this.colorText(`[${gear}]`, gearColor));
+        
+        // Blinkers using simple arrow symbols with colors
+        // Left blinker: use colored arrow
+        const leftArrow = data.blinkerOnLeft 
+            ? this.colorText('◄', c.green)
+            : this.colorText('◄', c.dimGray);
+        // Right blinker
+        const rightArrow = data.blinkerOnRight 
+            ? this.colorText('►', c.green)
+            : this.colorText('►', c.dimGray);
+        parts.push(leftArrow);
+        parts.push(rightArrow);
+        
+        // Autopilot (if active)
+        const autopilot = this.autopilotMap[data.autopilotState] || '';
+        if (autopilot && data.autopilotState !== 'NONE') {
+            parts.push(this.colorText(`@${autopilot}`, c.blue));
+        }
+        
+        // Accelerator with lightning symbol and percentage
+        const accelPercent = Math.round(data.acceleratorPedalPosition || 0);
+        if (accelPercent > 0) {
+            parts.push(this.colorText(`↑${accelPercent}%`, c.green));
+        } else {
+            parts.push(this.colorText('↑', c.dimGray));
+        }
+        
+        // Brake with symbol
+        if (data.brakeApplied) {
+            parts.push(this.colorText('●BRAKE', c.red));
+        } else {
+            parts.push(this.colorText('○', c.dimGray));
+        }
+        
+        return parts.join('  ');
+    }
+    
+    /**
+     * Generate a single dialogue line for ASS
+     * @param {number} startTime - Start time in seconds
+     * @param {number} endTime - End time in seconds
+     * @param {string} text - Text to display
+     * @returns {string} ASS dialogue line
+     */
+    generateDialogue(startTime, endTime, text) {
+        const start = this.formatAssTime(startTime);
+        const end = this.formatAssTime(endTime);
+        // Escape special ASS characters
+        const escapedText = text.replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}');
+        return `Dialogue: 0,${start},${end},Metadata,,0,0,0,,${escapedText}`;
+    }
+    
+    /**
+     * Generate complete ASS subtitle file content from metadata
+     * @param {Array} allMetadata - Array of segment metadata from loadMetadataForSegments
+     * @param {Array} clipSegments - Array of clip segments with timing info
+     * @param {string} lang - Language code
+     * @param {number} width - Video width
+     * @param {number} height - Video height
+     * @returns {string} Complete ASS file content
+     */
+    generateAssContent(allMetadata, clipSegments, lang = 'zh', width = 1920, height = 1080) {
+        let content = this.generateHeader(width, height);
+        const dialogues = [];
+        
+        // Track accumulated time across segments
+        let accumulatedTime = 0;
+        
+        for (let segIdx = 0; segIdx < clipSegments.length; segIdx++) {
+            const clipSeg = clipSegments[segIdx];
+            const segmentMetadata = allMetadata.find(m => m.segmentIndex === segIdx);
+            
+            if (!segmentMetadata || !segmentMetadata.metadata || segmentMetadata.metadata.length === 0) {
+                accumulatedTime += clipSeg.clipDuration;
+                continue;
+            }
+            
+            const metadata = segmentMetadata.metadata;
+            const clipStart = clipSeg.clipStart;
+            const clipEnd = clipSeg.clipEnd;
+            
+            // Filter metadata within clip range and generate dialogues
+            for (let i = 0; i < metadata.length; i++) {
+                const item = metadata[i];
+                const itemTime = item.time;
+                
+                // Skip if outside clip range
+                if (itemTime < clipStart || itemTime > clipEnd) continue;
+                
+                // Calculate relative time in output video
+                const relativeStart = accumulatedTime + (itemTime - clipStart);
+                
+                // Find end time (next metadata item or segment end)
+                let relativeEnd;
+                if (i + 1 < metadata.length && metadata[i + 1].time <= clipEnd) {
+                    relativeEnd = accumulatedTime + (metadata[i + 1].time - clipStart);
+                } else {
+                    relativeEnd = accumulatedTime + (clipEnd - clipStart);
+                }
+                
+                // Ensure minimum duration of 0.1s
+                if (relativeEnd - relativeStart < 0.1) {
+                    relativeEnd = relativeStart + 0.1;
+                }
+                
+                const text = this.formatMetadataText(item.data, lang);
+                if (text) {
+                    dialogues.push(this.generateDialogue(relativeStart, relativeEnd, text));
+                }
+            }
+            
+            accumulatedTime += clipSeg.clipDuration;
+        }
+        
+        content += dialogues.join('\n');
+        return content;
+    }
+    
+    /**
+     * Generate ASS file for single camera export
+     * @param {Array} allMetadata - Metadata array
+     * @param {Array} clipSegments - Clip segments
+     * @param {string} lang - Language
+     * @returns {string} ASS content
+     */
+    generateForSingleCamera(allMetadata, clipSegments, lang = 'zh') {
+        return this.generateAssContent(allMetadata, clipSegments, lang, 1920, 1080);
+    }
+    
+    /**
+     * Generate ASS file for grid video export
+     * @param {Array} allMetadata - Metadata array
+     * @param {Array} clipSegments - Clip segments
+     * @param {number} cameraCount - Number of cameras in grid
+     * @param {string} lang - Language
+     * @returns {string} ASS content
+     */
+    generateForGrid(allMetadata, clipSegments, cameraCount, lang = 'zh') {
+        // Calculate grid dimensions
+        let width, height;
+        if (cameraCount <= 2) {
+            width = 1920;
+            height = 540;
+        } else if (cameraCount <= 4) {
+            width = 1920;
+            height = 1080;
+        } else {
+            width = 2880;
+            height = 1080;
+        }
+        
+        return this.generateAssContent(allMetadata, clipSegments, lang, width, height);
+    }
+}
+
+// Global instance for ASS generation
+// Global instances for metadata overlay generation
+const assSubtitleGenerator = new AssSubtitleGenerator();
+const metadataOverlayGenerator = new MetadataOverlayGenerator();
+
 class MetadataManager {
     constructor(viewer) {
         this.viewer = viewer;
@@ -300,7 +1492,8 @@ class MetadataManager {
                 blinkerLeft: document.getElementById('metaBlinkerLeft'),
                 blinkerRight: document.getElementById('metaBlinkerRight'),
                 brakeIcon: document.getElementById('metaBrakeIcon'),
-                brakeActiveGroup: document.getElementById('brakeActiveGroup'),
+                brakeActiveGroup: document.querySelector('#metaBrakeIcon .brake-active'),
+                brakeInactiveGroup: document.querySelector('#metaBrakeIcon .brake-inactive'),
                 acceleratorIcon: document.getElementById('metaAcceleratorIcon'),
                 accelFillRect: document.getElementById('accelFillRect'),
                 autopilot: document.getElementById('metaAutopilot'),
@@ -562,11 +1755,8 @@ class MetadataManager {
         }
         v.acceleratorIcon.classList.toggle('active', accelPercent > 5);
         
-        // Update brake - show red active group when brake is applied
+        // Update brake - use CSS class to toggle active state
         const brakeApplied = d.brakeApplied || false;
-        if (v.brakeActiveGroup) {
-            v.brakeActiveGroup.setAttribute('opacity', brakeApplied ? 1 : 0);
-        }
         v.brakeIcon.classList.toggle('active', brakeApplied);
         
         // Update blinkers
@@ -816,8 +2006,10 @@ class VideoListComponent {
         const eventTypeLabel = this.getEventTypeLabel(event.eventType);
 
         infoDiv.innerHTML = `
-            <div class="video-time">${cityHtml}${timeString}</div>
-            <div class="video-type" title="${eventTypeLabel}">${eventTypeLabel.split(' ')[0]}</div>
+            <div class="video-time">
+                <span class="video-type-tag" title="${eventTypeLabel}">${eventTypeLabel.split(' ')[0]}</span>
+                ${cityHtml}${timeString}
+            </div>
         `;
         card.appendChild(infoDiv);
         
@@ -2132,7 +3324,146 @@ class VideoClipProcessor {
         this.ctx = null;
         this.mediaRecorder = null;
         this.recordingStartTime = null;
+        this.ffmpegFixerLoaded = false;
         this.ffmpeg = null;
+        // SVG icon cache for metadata overlay
+        this.metadataIcons = null;
+        this.iconsLoaded = false;
+        this.ffmpegChild = null;
+        this.isCancelled = false;
+    }
+
+    cancelExport() {
+        console.warn('[VideoClipProcessor] Cancelling export...');
+        this.isCancelled = true;
+        if (this.ffmpegChild) {
+            try {
+                this.ffmpegChild.kill();
+                console.log('[VideoClipProcessor] FFmpeg process killed');
+            } catch (e) {
+                console.error('[VideoClipProcessor] Failed to kill FFmpeg process:', e);
+            }
+            this.ffmpegChild = null;
+        }
+        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+            try {
+                this.mediaRecorder.stop();
+            } catch (e) {}
+        }
+    }
+
+    /**
+     * Create SVG icon as Image object
+     * @param {string} svgContent - SVG markup string
+     * @param {number} size - Icon size in pixels
+     * @returns {Promise<HTMLImageElement>}
+     */
+    createSvgIcon(svgContent, size = 24) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            img.onload = () => {
+                URL.revokeObjectURL(url);
+                resolve(img);
+            };
+            img.onerror = (e) => {
+                URL.revokeObjectURL(url);
+                reject(e);
+            };
+            img.src = url;
+        });
+    }
+
+    /**
+     * Load all metadata icons for video export
+     */
+    async loadMetadataIcons() {
+        if (this.iconsLoaded && this.metadataIcons) {
+            return this.metadataIcons;
+        }
+
+        const iconSize = 24;
+        
+        // SVG definitions for each icon
+        const svgDefs = {
+            // Left blinker arrow (green when active)
+            blinkerLeft: (active) => `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="${iconSize}" height="${iconSize}">
+                    <path d="M20 8 L6 24 L20 40 L20 30 L42 30 L42 18 L20 18 Z" 
+                          fill="${active ? '#52c41a' : 'rgba(255,255,255,0.3)'}" 
+                          stroke="${active ? '#52c41a' : 'rgba(255,255,255,0.5)'}" 
+                          stroke-width="2" stroke-linejoin="round"/>
+                </svg>`,
+            // Right blinker arrow (green when active)
+            blinkerRight: (active) => `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="${iconSize}" height="${iconSize}">
+                    <path d="M28 8 L42 24 L28 40 L28 30 L6 30 L6 18 L28 18 Z" 
+                          fill="${active ? '#52c41a' : 'rgba(255,255,255,0.3)'}" 
+                          stroke="${active ? '#52c41a' : 'rgba(255,255,255,0.5)'}" 
+                          stroke-width="2" stroke-linejoin="round"/>
+                </svg>`,
+            // Brake icon (brake pedal - red when active)
+            brake: (active) => `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="${iconSize}" height="${iconSize}">
+                    <path d="M821.394 861.482H200.242c-23.709 0-44.013-20.191-45.124-44.975 0 0-30.555-129.896-30.044-166.228 0.325-23.102 15.23-164.3 15.23-164.3 2.449-27.739 18.019-48.258 42.686-48.258h646.233c24.667 0 44.357 21.769 43.759 48.258l14.579 163.622-22.043 166.906c-0.56 24.784-20.414 44.975-44.124 44.975z m24.716-358.364l0.292-10.498c0.23-8.275-6.452-15.059-14.85-15.059H186.497c-8.397 0-14.828 6.784-14.291 15.059l0.681 10.498c0.534 8.232 7.802 14.954 16.153 14.954h641.472c8.35 0 15.37-6.722 15.598-14.954z m8.739 81.304l0.296-10.264c0.233-8.091-6.628-14.724-15.248-14.724H177.735c-8.62 0-15.226 6.633-14.681 14.724l0.691 10.264c0.542 8.049 7.999 14.622 16.571 14.622H838.84c8.574 0 15.777-6.572 16.009-14.622z m6.172 79.506l0.298-10.038c0.235-7.912-6.747-14.399-15.516-14.399H172.234c-8.769 0-15.494 6.487-14.945 14.399l0.695 10.038c0.545 7.872 8.126 14.3 16.847 14.3h669.91c8.721 0 16.047-6.428 16.28-14.3z m-14.901 77.765l0.282-9.819c0.222-7.74-6.466-14.085-14.863-14.085H186.526c-8.397 0-14.841 6.345-14.322 14.085l0.659 9.819c0.517 7.701 7.772 13.989 16.123 13.989h641.548c8.351 0 15.365-6.288 15.586-13.989z m-8.749 76.081l0.267-9.608c0.21-7.573-6.189-13.781-14.222-13.781H206.385c-8.033 0-14.202 6.208-13.711 13.781l0.623 9.608c0.489 7.535 7.425 13.688 15.415 13.688h613.751c7.99 0.001 14.698-6.152 14.908-13.688z m1.869-378.856l36.038-94.167 21.623-119.775H785.183L752.749 356.56l-118.926 82.358H839.24z" fill="${active ? '#ff4d4f' : 'rgba(255,255,255,0.3)'}"/>
+                </svg>`,
+            // Accelerator/throttle icon (green fill based on percentage)
+            accelerator: (percent) => {
+                const fillHeight = (percent / 100) * 20;
+                const yPos = 26 - fillHeight;
+                const color = percent > 0 ? '#73d13d' : 'rgba(255,255,255,0.4)';
+                return `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${iconSize}" height="${iconSize}">
+                    <rect x="8" y="4" width="16" height="24" rx="3" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>
+                    <path d="M18 8 L13 16 L16 16 L14 24 L19 15 L16 15 L18 8 Z" fill="${color}"/>
+                    ${percent > 0 ? `<rect x="10" y="${yPos}" width="12" height="${fillHeight}" rx="2" fill="#73d13d" opacity="0.9"/>` : ''}
+                </svg>`;
+            },
+            // Autopilot/steering wheel icon (blue when active)
+            autopilot: (active) => `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${iconSize}" height="${iconSize}">
+                    <circle cx="32" cy="32" r="26" fill="none" stroke="${active ? '#1890ff' : 'rgba(255,255,255,0.6)'}" stroke-width="4"/>
+                    <circle cx="32" cy="32" r="8" fill="${active ? '#1890ff' : 'rgba(255,255,255,0.6)'}"/>
+                    <rect x="6" y="29" width="17" height="6" rx="2" fill="${active ? '#1890ff' : 'rgba(255,255,255,0.6)'}"/>
+                    <rect x="41" y="29" width="17" height="6" rx="2" fill="${active ? '#1890ff' : 'rgba(255,255,255,0.6)'}"/>
+                    <rect x="29" y="41" width="6" height="17" rx="2" fill="${active ? '#1890ff' : 'rgba(255,255,255,0.6)'}"/>
+                </svg>`
+        };
+
+        // Pre-generate common icon states
+        this.metadataIcons = {
+            blinkerLeftActive: await this.createSvgIcon(svgDefs.blinkerLeft(true), iconSize),
+            blinkerLeftInactive: await this.createSvgIcon(svgDefs.blinkerLeft(false), iconSize),
+            blinkerRightActive: await this.createSvgIcon(svgDefs.blinkerRight(true), iconSize),
+            blinkerRightInactive: await this.createSvgIcon(svgDefs.blinkerRight(false), iconSize),
+            brakeActive: await this.createSvgIcon(svgDefs.brake(true), iconSize),
+            brakeInactive: await this.createSvgIcon(svgDefs.brake(false), iconSize),
+            autopilotActive: await this.createSvgIcon(svgDefs.autopilot(true), iconSize),
+            autopilotInactive: await this.createSvgIcon(svgDefs.autopilot(false), iconSize),
+            // Generate accelerator icons for 0%, 25%, 50%, 75%, 100%
+            accel0: await this.createSvgIcon(svgDefs.accelerator(0), iconSize),
+            accel25: await this.createSvgIcon(svgDefs.accelerator(25), iconSize),
+            accel50: await this.createSvgIcon(svgDefs.accelerator(50), iconSize),
+            accel75: await this.createSvgIcon(svgDefs.accelerator(75), iconSize),
+            accel100: await this.createSvgIcon(svgDefs.accelerator(100), iconSize),
+            iconSize
+        };
+
+        this.iconsLoaded = true;
+        return this.metadataIcons;
+    }
+
+    /**
+     * Get accelerator icon based on percentage
+     */
+    getAcceleratorIcon(percent) {
+        if (!this.metadataIcons) return null;
+        if (percent <= 0) return this.metadataIcons.accel0;
+        if (percent <= 25) return this.metadataIcons.accel25;
+        if (percent <= 50) return this.metadataIcons.accel50;
+        if (percent <= 75) return this.metadataIcons.accel75;
+        return this.metadataIcons.accel100;
     }
 
     formatBytes(bytes) {
@@ -2194,15 +3525,126 @@ class VideoClipProcessor {
         console.log('[VideoClipProcessor] Cleanup completed');
     }
 
+
+    // IndexedDB cache for FFmpeg WASM files
+    static FFMPEG_CACHE_DB = 'FFmpegWASMCache';
+    static FFMPEG_CACHE_STORE = 'files';
+    static FFMPEG_CACHE_VERSION = '0.12.6'; // Update when upgrading FFmpeg version
+    
+    async openCacheDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(VideoClipProcessor.FFMPEG_CACHE_DB, 1);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(VideoClipProcessor.FFMPEG_CACHE_STORE)) {
+                    db.createObjectStore(VideoClipProcessor.FFMPEG_CACHE_STORE, { keyPath: 'url' });
+                }
+            };
+        });
+    }
+    
+    async getCachedFile(db, url) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction([VideoClipProcessor.FFMPEG_CACHE_STORE], 'readonly');
+            const store = transaction.objectStore(VideoClipProcessor.FFMPEG_CACHE_STORE);
+            const request = store.get(url);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+        });
+    }
+    
+    async setCachedFile(db, url, data, mimeType) {
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction([VideoClipProcessor.FFMPEG_CACHE_STORE], 'readwrite');
+            const store = transaction.objectStore(VideoClipProcessor.FFMPEG_CACHE_STORE);
+            const request = store.put({ 
+                url, 
+                data, 
+                mimeType, 
+                version: VideoClipProcessor.FFMPEG_CACHE_VERSION,
+                timestamp: Date.now() 
+            });
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+        });
+    }
+    
+    async toBlobURLWithCache(url, mimeType, progressCallback) {
+        try {
+            const db = await this.openCacheDB();
+            const cached = await this.getCachedFile(db, url);
+            
+            // Check if cached and version matches
+            if (cached && cached.version === VideoClipProcessor.FFMPEG_CACHE_VERSION && cached.data) {
+                console.log(`[FFmpeg] Loading from cache: ${url.split('/').pop()}`);
+                const blob = new Blob([cached.data], { type: mimeType });
+                db.close();
+                return URL.createObjectURL(blob);
+            }
+            
+            // Download and cache
+            console.log(`[FFmpeg] Downloading: ${url.split('/').pop()}`);
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch ${url}: ${response.status}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            const data = new Uint8Array(arrayBuffer);
+            
+            // Save to cache
+            try {
+                await this.setCachedFile(db, url, data, mimeType);
+                console.log(`[FFmpeg] Cached: ${url.split('/').pop()}`);
+            } catch (cacheError) {
+                console.warn('[FFmpeg] Failed to cache file:', cacheError);
+            }
+            
+            db.close();
+            return URL.createObjectURL(new Blob([arrayBuffer], { type: mimeType }));
+        } catch (error) {
+            // Fallback to direct download without caching
+            console.warn('[FFmpeg] Cache failed, downloading directly:', error);
+            const response = await fetch(url);
+            const blob = await response.blob();
+            return URL.createObjectURL(new Blob([await blob.arrayBuffer()], { type: mimeType }));
+        }
+    }
+
     async loadFFmpeg(progressCallback) {
         if (this.ffmpeg && this.ffmpegLoaded) return this.ffmpeg;
         
-        // Try different global names for FFmpeg WASM library
-        // CDN UMD build exposes FFmpegWASM global
-        const FFmpegLib = window.FFmpegWASM || window.FFmpeg;
+        // Dynamically load FFmpeg WASM library if not already loaded
+        let FFmpegLib = window.FFmpegWASM || window.FFmpeg;
         
         if (!FFmpegLib) {
-            throw new Error('FFmpeg WASM library not loaded. Please check if the script is included.');
+            progressCallback?.('加载 FFmpeg 库...');
+            console.log('[FFmpeg] Dynamically loading FFmpeg WASM library...');
+            
+            try {
+                // Try ESM import first - much better for cross-origin and avoids UMD chunk issues
+                // Use version 0.12.6 to match core
+                const module = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/+esm');
+                FFmpegLib = module;
+                console.log('[FFmpeg] FFmpeg library loaded via ESM');
+            } catch (esmError) {
+                console.warn('[FFmpeg] ESM import failed, falling back to UMD script tag:', esmError);
+                // Fallback to the UMD script tag if ESM fails
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    // Use 0.12.6 for better compatibility with core 0.12.6
+                    script.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/umd/ffmpeg.min.js';
+                    script.onload = resolve;
+                    script.onerror = () => reject(new Error('Failed to load FFmpeg library via script tag'));
+                    document.head.appendChild(script);
+                });
+                FFmpegLib = window.FFmpegWASM || window.FFmpeg;
+            }
+
+            if (!FFmpegLib) {
+                throw new Error('FFmpeg WASM library failed to initialize');
+            }
         }
 
         const { FFmpeg } = FFmpegLib;
@@ -2237,27 +3679,33 @@ class VideoClipProcessor {
         
         const startTime = performance.now();
         
-        // Load from local files for faster loading and offline support
-        // Must use absolute URLs for ffmpeg.wasm to work correctly
-        const baseURL = new URL('libs/ffmpeg', window.location.href).href;
+        // Load from CDN for web version
+        // Use unpkg CDN for ffmpeg core files
+        // Must use toBlobURL to convert remote scripts to Blob URLs to bypass CORS Worker restrictions
+        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+        const baseURLMT = 'https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/umd';
         
         try {
             if (useMultiThread) {
                 // Multi-threaded version - faster but requires COOP/COEP headers
-                await this.ffmpeg.load({
-                    coreURL: `${baseURL}/ffmpeg-core-mt.js`,
-                    wasmURL: `${baseURL}/ffmpeg-core-mt.wasm`,
-                    workerURL: `${baseURL}/ffmpeg-core.worker.js`,
-                    classWorkerURL: `${baseURL}/814.ffmpeg.js`,
-                });
+                progressCallback?.('加载 FFmpeg 核心文件 (使用本地缓存)...');
+                const [coreURL, wasmURL, workerURL] = await Promise.all([
+                    this.toBlobURLWithCache(`${baseURLMT}/ffmpeg-core.js`, 'text/javascript', progressCallback),
+                    this.toBlobURLWithCache(`${baseURLMT}/ffmpeg-core.wasm`, 'application/wasm', progressCallback),
+                    this.toBlobURLWithCache(`${baseURLMT}/ffmpeg-core.worker.js`, 'text/javascript', progressCallback),
+                ]);
+                progressCallback?.('初始化 FFmpeg...');
+                await this.ffmpeg.load({ coreURL, wasmURL, workerURL });
                 this.ffmpegMultiThread = true;
             } else {
                 // Single-threaded version - more stable
-                await this.ffmpeg.load({
-                    coreURL: `${baseURL}/ffmpeg-core.js`,
-                    wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-                    classWorkerURL: `${baseURL}/814.ffmpeg.js`,
-                });
+                progressCallback?.('加载 FFmpeg 核心文件 (使用本地缓存)...');
+                const [coreURL, wasmURL] = await Promise.all([
+                    this.toBlobURLWithCache(`${baseURL}/ffmpeg-core.js`, 'text/javascript', progressCallback),
+                    this.toBlobURLWithCache(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm', progressCallback),
+                ]);
+                progressCallback?.('初始化 FFmpeg...');
+                await this.ffmpeg.load({ coreURL, wasmURL });
                 this.ffmpegMultiThread = false;
             }
         } catch (mtError) {
@@ -2265,11 +3713,11 @@ class VideoClipProcessor {
             if (useMultiThread) {
                 console.warn('[FFmpeg] Multi-thread load failed, falling back to single-thread:', mtError);
                 progressCallback?.('多线程加载失败，使用单线程模式...');
-                await this.ffmpeg.load({
-                    coreURL: `${baseURL}/ffmpeg-core.js`,
-                    wasmURL: `${baseURL}/ffmpeg-core.wasm`,
-                    classWorkerURL: `${baseURL}/814.ffmpeg.js`,
-                });
+                const [coreURL, wasmURL] = await Promise.all([
+                    this.toBlobURLWithCache(`${baseURL}/ffmpeg-core.js`, 'text/javascript', progressCallback),
+                    this.toBlobURLWithCache(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm', progressCallback),
+                ]);
+                await this.ffmpeg.load({ coreURL, wasmURL });
                 this.ffmpegMultiThread = false;
             } else {
                 throw mtError;
@@ -2280,6 +3728,54 @@ class VideoClipProcessor {
         const loadTime = ((performance.now() - startTime) / 1000).toFixed(1);
         console.log(`[FFmpeg] FFmpeg WASM loaded successfully in ${loadTime}s (multi-thread: ${this.ffmpegMultiThread})`);
         return this.ffmpeg;
+    }
+    
+    // Fix WebM metadata using FFmpeg WASM (for streamed files)
+    async fixWebmWithFFmpeg(fileHandle, progressCallback) {
+        try {
+            progressCallback?.(this.currentLanguage === 'zh' ? '加载 FFmpeg 修复模块...' : 'Loading FFmpeg repair module...');
+            const ffmpeg = await this.loadFFmpeg(progressCallback);
+            
+            // Read the file content
+            progressCallback?.(this.currentLanguage === 'zh' ? '读取视频文件...' : 'Reading video file...');
+            const file = await fileHandle.getFile();
+            const inputData = new Uint8Array(await file.arrayBuffer());
+            
+            // Write to FFmpeg virtual filesystem
+            await ffmpeg.writeFile('input.webm', inputData);
+            
+            // Run FFmpeg to remux (copy streams, fix metadata)
+            progressCallback?.(this.currentLanguage === 'zh' ? '修复视频元数据...' : 'Repairing video metadata...');
+            await ffmpeg.exec([
+                '-i', 'input.webm',
+                '-c', 'copy',
+                '-y',
+                'output.webm'
+            ]);
+            
+            // Read the fixed file
+            const outputData = await ffmpeg.readFile('output.webm');
+            
+            // Clean up FFmpeg virtual filesystem
+            try {
+                await ffmpeg.deleteFile('input.webm');
+                await ffmpeg.deleteFile('output.webm');
+            } catch (e) {
+                console.warn('[FFmpeg] Cleanup warning:', e);
+            }
+            
+            // Write back to the original file
+            progressCallback?.(this.currentLanguage === 'zh' ? '保存修复后的视频...' : 'Saving repaired video...');
+            const writable = await fileHandle.createWritable();
+            await writable.write(outputData);
+            await writable.close();
+            
+            console.log('[FFmpeg] WebM metadata fixed successfully');
+            return true;
+        } catch (error) {
+            console.error('[FFmpeg] Failed to fix WebM metadata:', error);
+            return false;
+        }
     }
     
     // Helper function to fetch file as Uint8Array (replaces @ffmpeg/util fetchFile)
@@ -2638,6 +4134,127 @@ class VideoClipProcessor {
         return tauri.shell.Command.create('ffmpeg', args);
     }
 
+    /**
+     * Execute FFmpeg command with real-time progress updates
+     */
+    async executeFFmpegWithProgress(args, totalDuration, progressCallback, progressPrefix) {
+        if (!progressPrefix) {
+            progressPrefix = this.currentLanguage === 'zh' ? '编码中...' : 'Encoding...';
+        }
+        const tauri = window.__TAURI__;
+        const command = this.createFFmpegCommand(args);
+        
+        return new Promise((resolve, reject) => {
+            let stderr = '';
+            let resolved = false;
+            let lastProgressTime = Date.now();
+            let progressCheckInterval = null;
+            let childProcess = null;
+            
+            const cleanup = () => {
+                if (progressCheckInterval) {
+                    clearInterval(progressCheckInterval);
+                    progressCheckInterval = null;
+                }
+            };
+            
+            const onFinished = data => {
+                if (resolved) return;
+                resolved = true;
+                cleanup();
+                
+                console.log('[FFmpeg] Process finished/terminated:', data);
+                const code = typeof data === 'number' ? data : (data && typeof data.code === 'number' ? data.code : 0);
+                
+                if (code === 0) {
+                    resolve({ code: 0, stderr });
+                } else {
+                    const lastError = stderr.split('\n').filter(l => l.includes('Error') || l.includes('error')).pop() || '未知错误';
+                    reject(new Error(`FFmpeg 错误 (code ${code}): ${lastError}`));
+                }
+            };
+
+            command.on('close', onFinished);
+            command.on('terminated', onFinished);
+            
+            command.on('error', error => {
+                if (resolved) return;
+                resolved = true;
+                cleanup();
+                console.error('[FFmpeg] Process error:', error);
+                reject(error);
+            });
+            
+            command.on('stdout', line => {
+                // Consume stdout to prevent buffer fill
+                lastProgressTime = Date.now();
+                if (line && line.includes('progress=end')) {
+                    console.log('[FFmpeg] Progress end detected in stdout');
+                }
+            });
+            
+            command.on('stderr', line => {
+                // line is usually a string in Tauri v2 shell plugin
+                stderr += line + '\n';
+                lastProgressTime = Date.now();
+                
+                // Detailed logging for debugging
+                if (line.includes('Error') || line.includes('error')) {
+                    console.error('[FFmpeg stderr]', line);
+                }
+                
+                // Keep stderr buffer manageable
+                if (stderr.length > 20000) {
+                    stderr = stderr.substring(stderr.length - 10000);
+                }
+                
+                // Parse FFmpeg progress: time=00:00:05.12 or time=00:00:05.123
+                const timeMatch = line.match(/time=(\d{2}):(\d{2}):(\d{2})\.(\d+)/);
+                if (timeMatch && totalDuration > 0) {
+                    const hours = parseInt(timeMatch[1], 10);
+                    const minutes = parseInt(timeMatch[2], 10);
+                    const seconds = parseInt(timeMatch[3], 10);
+                    const msStr = timeMatch[4];
+                    // Handle different millisecond lengths (.1, .12, .123)
+                    const ms = parseFloat("0." + msStr);
+                    const currentTime = hours * 3600 + minutes * 60 + seconds + ms;
+                    
+                    const progress = Math.min(99, Math.round((currentTime / totalDuration) * 100));
+                    progressCallback?.(`${progressPrefix} ${progress}%`);
+                    
+                    // Check if we've reached near the end
+                    if (currentTime >= totalDuration - 0.5) {
+                        console.log('[FFmpeg] Reached end of expected duration, waiting for process to finish...');
+                    }
+                }
+            });
+            
+            console.log('[FFmpeg] Spawning process with args:', args.slice(0, 10).join(' '), '...');
+            command.spawn().then(child => {
+                childProcess = child;
+                this.ffmpegChild = child;
+                console.log('[FFmpeg] Process spawned successfully, PID:', child.pid);
+                
+                // Set up a watchdog to detect if FFmpeg has stalled
+                // Check every 30 seconds if we've received any output
+                progressCheckInterval = setInterval(() => {
+                    const timeSinceLastProgress = Date.now() - lastProgressTime;
+                    console.log(`[FFmpeg Watchdog] Time since last output: ${Math.round(timeSinceLastProgress / 1000)}s`);
+                    
+                    // If no output for 2 minutes, something is wrong
+                    if (timeSinceLastProgress > 120000 && !resolved) {
+                        console.warn('[FFmpeg Watchdog] No output for 2 minutes, process may be stuck');
+                        console.warn('[FFmpeg Watchdog] Last stderr:', stderr.slice(-500));
+                    }
+                }, 30000);
+            }).catch(err => {
+                cleanup();
+                console.error('[FFmpeg] Failed to spawn process:', err);
+                reject(err);
+            });
+        });
+    }
+
     async processWithFFmpeg(clipSegments, camera, progressCallback) {
         const tauri = window.__TAURI__;
         const fs = tauri.fs;
@@ -2649,7 +4266,8 @@ class VideoClipProcessor {
         
         // Get directory path (handle both forward and back slashes)
         const pathSeparator = firstFile.path.includes('\\') ? '\\' : '/';
-        const workDir = firstFile.path.substring(0, firstFile.path.lastIndexOf(pathSeparator));
+        const lastSepIdx = firstFile.path.lastIndexOf(pathSeparator);
+        let workDir = lastSepIdx !== -1 ? firstFile.path.substring(0, lastSepIdx) : '.';
         
         const timestamp = new Date().getTime();
         const listFilename = `ffmpeg_list_${camera}_${timestamp}.txt`;
@@ -2665,9 +4283,8 @@ class VideoClipProcessor {
             if (!file || !file.path) continue;
             
             // For ffmpeg concat, paths should be escaped
-            // Windows paths: C:\Path\To\File -> 'C:\Path\To\File'
-            // We need to escape single quotes in the path
-            const safePath = file.path.replace(/'/g, "'\\''");
+            // FFmpeg concat demuxer needs forward slashes even on Windows
+            const safePath = file.path.replace(/\\/g, '/').replace(/'/g, "'\\''");
             listContent += `file '${safePath}'\n`;
             listContent += `inpoint ${seg.clipStart}\n`;
             listContent += `outpoint ${seg.clipEnd}\n`;
@@ -2688,14 +4305,13 @@ class VideoClipProcessor {
             ];
             
             console.log('Running ffmpeg:', args);
-            progressCallback?.(`FFmpeg 导出中...`);
+            progressCallback?.(this.currentLanguage === 'zh' ? `FFmpeg 极速导出中...` : `FFmpeg Fast Exporting...`);
             
-            const command = this.createFFmpegCommand(args);
-            const output = await command.execute();
-            
-            if (output.code !== 0) {
-                throw new Error(`FFmpeg error: ${output.stderr}`);
-            }
+            const totalDuration = clipSegments.reduce((sum, seg) => {
+                const dur = (seg.clipEnd || 60) - (seg.clipStart || 0);
+                return sum + (dur > 0 ? dur : 0);
+            }, 0);
+            const output = await this.executeFFmpegWithProgress(args, totalDuration, progressCallback, this.currentLanguage === 'zh' ? '极速导出...' : 'Fast Exporting...');
             
             // Read result
             const binary = await fs.readFile(outputPath);
@@ -2716,10 +4332,15 @@ class VideoClipProcessor {
     }
 
 
-    async processClip(segments, cameras, startTime, endTime, addTimestamp, mergeGrid, eventStartTime, progressCallback, useLocalFFmpeg = false, language = 'zh', fileHandle = null) {
+
+
+    async processClip(segments, cameras, startTime, endTime, addTimestamp, addMetadata, mergeGrid, eventStartTime, progressCallback, useLocalFFmpeg = false, language = 'zh', fileHandle = null, metadataManager = null) {
         try {
+            // Reset cancellation state
+            this.isCancelled = false;
             // Store language for use in processing methods
             this.currentLanguage = language;
+            this.metadataManager = metadataManager;
             // Calculate which segments are needed
             const clipSegments = this.getSegmentsForTimeRange(segments, startTime, endTime);
             
@@ -2737,25 +4358,26 @@ class VideoClipProcessor {
                 console.log('[VideoClipProcessor] Using local FFmpeg for export');
                 
                 if (mergeGrid && cameras.length > 1) {
-                    // FFmpeg grid merge with optional timestamp
-                    progressCallback?.('FFmpeg 合成四宫格视频...');
-                    const result = await this.processWithFFmpegGrid(clipSegments, cameras, addTimestamp, eventStartTime, progressCallback);
+                    // FFmpeg grid merge with optional timestamp and metadata
+                    progressCallback?.(this.currentLanguage === 'zh' ? 'FFmpeg 合成四宫格视频...' : 'FFmpeg Merging Grid Video...');
+                    const result = await this.processWithFFmpegGrid(clipSegments, cameras, addTimestamp, addMetadata, eventStartTime, progressCallback);
                     return [result];
                 } else {
                     // FFmpeg single camera export
                     const results = [];
                     for (const camera of cameras) {
-                        progressCallback?.(`FFmpeg 极速导出 ${camera}...`);
-                        const result = await this.processWithFFmpegFull(clipSegments, camera, addTimestamp, eventStartTime, progressCallback);
+                        if (this.isCancelled) throw new Error(this.currentLanguage === 'zh' ? '导出已取消' : 'Export Cancelled');
+                        progressCallback?.(this.currentLanguage === 'zh' ? `FFmpeg 极速导出 ${camera}...` : `FFmpeg Fast Exporting ${camera}...`);
+                        const result = await this.processWithFFmpegFull(clipSegments, camera, addTimestamp, addMetadata, eventStartTime, progressCallback);
                         results.push(result);
                     }
                     return results;
                 }
             }
 
-            // 2. Fallback: Try native FFmpeg for fast copy (no timestamp, no grid) - Tauri only
+            // 2. Fallback: Try native FFmpeg for fast copy (no timestamp, no grid, no metadata) - Tauri only
             const hasFFmpeg = await this.checkFFmpeg();
-            if (hasFFmpeg && !addTimestamp && !mergeGrid) {
+            if (hasFFmpeg && !addTimestamp && !addMetadata && !mergeGrid) {
                  const results = [];
                  for (const camera of cameras) {
                      progressCallback?.(`极速导出 ${camera}...`);
@@ -2801,6 +4423,7 @@ class VideoClipProcessor {
                         startTime,
                         endTime,
                         addTimestamp,
+                        addMetadata,
                         eventStartTime,
                         progressCallback,
                         fileHandle
@@ -2819,6 +4442,7 @@ class VideoClipProcessor {
                             startTime, 
                             endTime, 
                             addTimestamp,
+                            addMetadata,
                             eventStartTime,
                             progressCallback,
                             fileHandle
@@ -2840,6 +4464,7 @@ class VideoClipProcessor {
                     startTime,
                     endTime,
                     addTimestamp,
+                    addMetadata,
                     eventStartTime,
                     progressCallback
                 );
@@ -2858,6 +4483,7 @@ class VideoClipProcessor {
                     startTime, 
                     endTime, 
                     addTimestamp,
+                    addMetadata,
                     eventStartTime,
                     progressCallback
                 );
@@ -2876,8 +4502,8 @@ class VideoClipProcessor {
         }
     }
     
-    // FFmpeg full export with optional timestamp (single camera)
-    async processWithFFmpegFull(clipSegments, camera, addTimestamp, eventStartTime, progressCallback) {
+    // FFmpeg full export with optional timestamp and metadata (single camera)
+    async processWithFFmpegFull(clipSegments, camera, addTimestamp, addMetadata, eventStartTime, progressCallback) {
         const tauri = window.__TAURI__;
         const fs = tauri.fs;
         const shell = tauri.shell;
@@ -2886,7 +4512,8 @@ class VideoClipProcessor {
         if (!firstFile || !firstFile.path) throw new Error(`${camera} 摄像头文件路径未找到`);
         
         const pathSeparator = firstFile.path.includes('\\') ? '\\' : '/';
-        const workDir = firstFile.path.substring(0, firstFile.path.lastIndexOf(pathSeparator));
+        const lastSepIdx = firstFile.path.lastIndexOf(pathSeparator);
+        let workDir = lastSepIdx !== -1 ? firstFile.path.substring(0, lastSepIdx) : '.';
         
         const timestamp = new Date().getTime();
         const listFilename = `ffmpeg_list_${camera}_${timestamp}.txt`;
@@ -2895,12 +4522,15 @@ class VideoClipProcessor {
         const listPath = `${workDir}${pathSeparator}${listFilename}`;
         const outputPath = `${workDir}${pathSeparator}${outputFilename}`;
         
+        // Track temp files for cleanup
+        const tempFiles = [listPath];
+        
         // Generate concat list
         let listContent = '';
         for (const seg of clipSegments) {
             const file = seg.segment.files[camera];
             if (!file || !file.path) continue;
-            const safePath = file.path.replace(/'/g, "'\\''");
+            const safePath = file.path.replace(/\\/g, '/').replace(/'/g, "'\\''");
             listContent += `file '${safePath}'\n`;
             listContent += `inpoint ${seg.clipStart}\n`;
             listContent += `outpoint ${seg.clipEnd}\n`;
@@ -2909,60 +4539,157 @@ class VideoClipProcessor {
         try {
             await fs.writeTextFile(listPath, listContent);
             
-            let args;
+            // Calculate total duration early for trim filters
+            const totalDuration = clipSegments.reduce((sum, seg) => {
+                const dur = (seg.clipEnd || 60) - (seg.clipStart || 0);
+                return sum + (dur > 0 ? dur : 0);
+            }, 0);
+            
+            // Generate PNG overlay for metadata if enabled
+            let allMetadata = null;
+            let overlayInfo = null;
+            
+            if (addMetadata && this.metadataManager) {
+                progressCallback?.(`加载 ${camera} 元数据...`);
+                allMetadata = await this.loadMetadataForSegments(clipSegments, camera, progressCallback);
+                
+                if (allMetadata && allMetadata.length > 0) {
+                    // Tesla cameras are typically 1280x960
+                    const videoWidth = 1280;
+                    const videoHeight = 960;
+                    
+                    progressCallback?.(`生成元数据图标覆盖层...`);
+                    try {
+                        overlayInfo = await metadataOverlayGenerator.generateOverlayPngs(
+                            allMetadata,
+                            clipSegments,
+                            workDir,
+                            videoWidth,
+                            videoHeight,
+                            progressCallback,
+                            this.currentLanguage
+                        );
+                        if (overlayInfo) {
+                            tempFiles.push(overlayInfo.pngDir);
+                            console.log('[FFmpeg] PNG overlays generated:', overlayInfo.pngDir);
+                        }
+                    } catch (pngError) {
+                        console.error('[FFmpeg] PNG overlay generation failed:', pngError);
+                        overlayInfo = null;
+                    }
+                }
+            }
+            
+            // Build filter chain
+            let filterComplex = '';
+            let inputArgs = ['-fflags', '+genpts', '-f', 'concat', '-safe', '0', '-i', listPath];
+            
+            console.log(`[FFmpeg] Exporting ${camera}, calculated duration: ${totalDuration}s`);
+
+            let currentLabel = '[0:v]';
+            
+            // Normalize video stream if we are re-encoding (timestamp or metadata enabled)
+            // This is CRITICAL to fix duration shortening issues caused by PTS gaps in concat demuxer
+            if (addTimestamp || addMetadata) {
+                // Use fps filter to fill gaps, setpts to ensure continuous timeline from 0
+                // and trim to force the expected duration.
+                filterComplex = `${currentLabel}fps=fps=30,setpts=PTS-STARTPTS,trim=duration=${totalDuration}[v_sync]`;
+                currentLabel = '[v_sync]';
+            }
+            
+            // Add timestamp filter if enabled
             if (addTimestamp) {
-                // With timestamp: need re-encode
-                // Extract full timestamp (with seconds) from filename
-                const firstFile = clipSegments[0].segment.files[camera];
-                const fileName = firstFile.name || firstFile.path.split(/[/\\]/).pop();
+                const firstFileRef = clipSegments[0].segment.files[camera];
+                const fileName = firstFileRef.name || firstFileRef.path.split(/[/\\]/).pop();
                 const fullTimestampMatch = fileName.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
                 
                 let firstSegTime;
                 if (fullTimestampMatch) {
                     firstSegTime = this.parseTimestamp(fullTimestampMatch[1]);
                 } else {
-                    // Fallback to segment timestamp (without seconds)
                     firstSegTime = this.parseTimestamp(clipSegments[0].timestamp);
                 }
                 
                 const clipStartTimeObj = new Date(firstSegTime.getTime() + clipSegments[0].clipStart * 1000);
                 const startEpoch = Math.floor(clipStartTimeObj.getTime() / 1000);
                 
-                console.log('[FFmpeg Timestamp Debug]', {
-                    fileName,
-                    fullTimestamp: fullTimestampMatch ? fullTimestampMatch[1] : null,
-                    segmentTimestamp: clipSegments[0].timestamp,
-                    firstSegTime: firstSegTime.toISOString(),
-                    clipStart: clipSegments[0].clipStart,
-                    clipStartTimeObj: clipStartTimeObj.toISOString(),
-                    startEpoch
-                });
-                
-                // Determine font file path based on OS (use CJK-compatible font)
                 let fontOption = "";
                 if (navigator.userAgent.includes('Windows')) {
                     fontOption = "fontfile='C\\:/Windows/Fonts/msyh.ttc':";
                 } else if (navigator.userAgent.includes('Mac')) {
-                    fontOption = "fontfile='/System/Library/Fonts/PingFang.ttc':";
+                    // Escape spaces for FFmpeg filter
+                    fontOption = "fontfile='/System/Library/Fonts/Hiragino\\ Sans\\ GB.ttc':";
                 }
 
-                // drawtext filter for timestamp (top-right corner)
-                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
+                // FFmpeg pts:localtime only accepts 2 arguments (localtime and epoch timestamp)
+                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
+                filterComplex += (filterComplex ? ';' : '') + `${currentLabel}${drawtext}[ts]`;
+                currentLabel = '[ts]';
+            }
+            
+            // Add PNG overlay filters for metadata
+            if (addMetadata && overlayInfo && overlayInfo.pngPaths && overlayInfo.pngPaths.size > 0) {
+                const overlayResult = await metadataOverlayGenerator.generateOverlayFilter(
+                    allMetadata,
+                    clipSegments,
+                    overlayInfo.pngPaths,
+                    workDir,
+                    1 // Video is input 0
+                );
                 
+                if (overlayResult.concatFile) {
+                    // Add background and concat stream to inputs
+                    const bgPath = overlayInfo.pngPaths.get('__background__');
+                    // Use -loop 1 for background image
+                    inputArgs.push('-loop', '1', '-i', bgPath);
+                    const bgIdx = 1; // Video is 0, background is 1
+
+                    inputArgs.push('-f', 'concat', '-safe', '0', '-i', overlayResult.concatFile);
+                    const metaIdx = 2; // Concat stream is 2
+
+                    tempFiles.push(overlayResult.concatFile);
+
+                    // Overlay background then metadata stream
+                    const xExpr = '(W-w)/2';
+                    const yExpr = '(H*0.97-h/2)';
+                    
+                    // Background and metadata streams also need synchronization
+                    const bgTrim = `[${bgIdx}:v]trim=duration=${totalDuration},setpts=PTS-STARTPTS[bg_trimmed]`;
+                    const metaSync = `[${metaIdx}:v]setpts=PTS-STARTPTS[meta_sync]`;
+                    
+                    // Apply overlays using synchronized streams
+                    const ovPart = `${bgTrim};${metaSync};${currentLabel}[bg_trimmed]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[bg_v];[bg_v][meta_sync]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[ov]`;
+                    
+                    filterComplex += (filterComplex ? ';' : '') + ovPart;
+                    currentLabel = '[ov]';
+                }
+            }
+            
+            let args;
+            if (filterComplex) {
+                // With filters: need re-encode
+                // Use filter_complex_script to avoid command line length limits on Windows
+                const filterScriptPath = `${workDir}${pathSeparator}ffmpeg_filter_${timestamp}.txt`;
+                console.log('[FFmpeg] Filter complex content:', filterComplex);
+                console.log('[FFmpeg] Current label for -map:', currentLabel);
+                await fs.writeTextFile(filterScriptPath, filterComplex);
+                tempFiles.push(filterScriptPath);
+
                 args = [
-                    '-f', 'concat',
-                    '-safe', '0',
-                    '-i', listPath,
-                    '-vf', drawtext,
+                    ...inputArgs,
+                    '-filter_complex_script', filterScriptPath,
+                    '-map', currentLabel,
+                    '-map', '0:a?',
                     '-c:v', 'libx264',
                     '-preset', 'fast',
                     '-crf', '23',
                     '-c:a', 'aac',
+                    '-t', String(Math.ceil(totalDuration + 0.5)),
                     '-y',
                     outputPath
                 ];
             } else {
-                // Without timestamp: fast copy
+                // Without filters: fast copy
                 args = [
                     '-f', 'concat',
                     '-safe', '0',
@@ -2974,37 +4701,68 @@ class VideoClipProcessor {
             }
             
             console.log('[FFmpeg] Running:', args.join(' '));
-            progressCallback?.(`FFmpeg 处理 ${camera}...`);
+            progressCallback?.(this.currentLanguage === 'zh' ? `FFmpeg 处理 ${camera}...` : `FFmpeg Processing ${camera}...`);
             
-            const command = this.createFFmpegCommand(args);
-            let output;
-            try {
-                output = await command.execute();
-            } catch (execError) {
-                console.error('[FFmpeg] Execute error:', execError);
-                throw new Error(`FFmpeg 执行失败: ${execError?.message || execError?.toString?.() || '命令执行异常'}`);
-            }
+            // totalDuration already calculated at line 4166
+            const output = await this.executeFFmpegWithProgress(args, totalDuration, progressCallback, this.currentLanguage === 'zh' ? `处理 ${camera}...` : `Processing ${camera}...`);
+            progressCallback?.(this.currentLanguage === 'zh' ? `处理 ${camera}: 100%` : `Processing ${camera}: 100%`);
             
-            console.log('[FFmpeg] Output:', output);
+            console.log('[FFmpeg] Finished processing camera:', camera);
             
             if (output.code !== 0) {
                 throw new Error(`FFmpeg 错误 (code ${output.code}): ${output.stderr || output.stdout || '未知错误'}`);
             }
             
-            // Return path instead of blob for Tauri
-            await fs.remove(listPath);
+            // Cleanup temp files
+            for (const f of tempFiles) {
+                try { 
+                    // Check if it's a directory (PNG overlay dir)
+                    if (f.includes('overlay_pngs_')) {
+                        await this.removeDirectory(f, fs);
+                    } else {
+                        await fs.remove(f); 
+                    }
+                } catch(_) {}
+            }
             
             return { camera, path: outputPath, isFile: true };
             
         } catch (e) {
-            try { await fs.remove(listPath); } catch(_) {}
+            // Cleanup on error
+            for (const f of tempFiles) {
+                try { 
+                    if (f.includes('overlay_pngs_')) {
+                        await this.removeDirectory(f, fs);
+                    } else {
+                        await fs.remove(f); 
+                    }
+                } catch(_) {}
+            }
             try { await fs.remove(outputPath); } catch(_) {}
             throw e;
         }
     }
     
-    // FFmpeg grid merge export
-    async processWithFFmpegGrid(clipSegments, cameras, addTimestamp, eventStartTime, progressCallback) {
+    // Helper to remove directory recursively
+    async removeDirectory(dirPath, fs) {
+        try {
+            const entries = await fs.readDir(dirPath);
+            for (const entry of entries) {
+                const entryPath = entry.path || `${dirPath}/${entry.name}`;
+                if (entry.children !== undefined) {
+                    await this.removeDirectory(entryPath, fs);
+                } else {
+                    await fs.remove(entryPath);
+                }
+            }
+            await fs.remove(dirPath);
+        } catch (e) {
+            console.warn('[FFmpeg] Failed to remove directory:', dirPath, e);
+        }
+    }
+    
+    // FFmpeg grid merge export with optional timestamp and metadata
+    async processWithFFmpegGrid(clipSegments, cameras, addTimestamp, addMetadata, eventStartTime, progressCallback) {
         const tauri = window.__TAURI__;
         const fs = tauri.fs;
         const shell = tauri.shell;
@@ -3028,11 +4786,19 @@ class VideoClipProcessor {
             });
         }
         
-        const firstFile = clipSegments[0].segment.files[sortedCameras[0]];
-        if (!firstFile || !firstFile.path) throw new Error('文件路径未找到');
+        // Filter out cameras that have no files in the selected range to prevent FFmpeg hangs
+        const activeCameras = sortedCameras.filter(cam => 
+            clipSegments.some(seg => seg.segment.files[cam] && seg.segment.files[cam].path)
+        );
+        
+        if (activeCameras.length === 0) throw new Error('没有可导出的视频流');
+        
+        const firstFile = clipSegments.find(seg => seg.segment.files[activeCameras[0]] && seg.segment.files[activeCameras[0]].path)?.segment.files[activeCameras[0]];
+        if (!firstFile) throw new Error('文件路径未找到');
         
         const pathSeparator = firstFile.path.includes('\\') ? '\\' : '/';
-        const workDir = firstFile.path.substring(0, firstFile.path.lastIndexOf(pathSeparator));
+        const lastSepIdx = firstFile.path.lastIndexOf(pathSeparator);
+        let workDir = lastSepIdx !== -1 ? firstFile.path.substring(0, lastSepIdx) : '.';
         
         const timestamp = new Date().getTime();
         const outputFilename = `TeslaCam_grid_${timestamp}.mp4`;
@@ -3043,7 +4809,9 @@ class VideoClipProcessor {
         const inputArgs = [];
         
         try {
-            for (const camera of sortedCameras) {
+            // Build concat files for each camera and track which ones have content
+            const validCameras = [];
+            for (const camera of activeCameras) {
                 const listFilename = `ffmpeg_list_${camera}_${timestamp}.txt`;
                 const listPath = `${workDir}${pathSeparator}${listFilename}`;
                 tempFiles.push(listPath);
@@ -3052,18 +4820,90 @@ class VideoClipProcessor {
                 for (const seg of clipSegments) {
                     const file = seg.segment.files[camera];
                     if (!file || !file.path) continue;
-                    const safePath = file.path.replace(/'/g, "'\\''");
+                    const safePath = file.path.replace(/\\/g, '/').replace(/'/g, "'\\''");
                     listContent += `file '${safePath}'\n`;
                     listContent += `inpoint ${seg.clipStart}\n`;
                     listContent += `outpoint ${seg.clipEnd}\n`;
                 }
                 
-                await fs.writeTextFile(listPath, listContent);
-                inputArgs.push('-f', 'concat', '-safe', '0', '-i', listPath);
+                // Only add cameras that have actual video files
+                if (listContent.trim()) {
+                    await fs.writeTextFile(listPath, listContent);
+                    inputArgs.push('-f', 'concat', '-safe', '0', '-i', listPath);
+                    validCameras.push(camera);
+                } else {
+                    console.warn(`[FFmpeg Grid] Camera ${camera} has no files in selected range, skipping`);
+                }
             }
             
+            // Update activeCameras to only include cameras with valid files
+            if (validCameras.length === 0) {
+                throw new Error('没有可导出的视频文件');
+            }
+            if (validCameras.length !== activeCameras.length) {
+                console.log(`[FFmpeg Grid] Reduced cameras from ${activeCameras.length} to ${validCameras.length}`);
+            }
+            // Replace activeCameras with validCameras for the rest of processing
+            const originalActiveCameras = activeCameras;
+            activeCameras.length = 0;
+            activeCameras.push(...validCameras);
+            
+            // Generate ASS subtitle for metadata if enabled
+            let allMetadata = null;
+            let overlayInfo = null;
+            
+            // Calculate grid dimensions
+            const count = activeCameras.length;
+            let gridWidth, gridHeight;
+            if (count <= 2) {
+                gridWidth = 1920;
+                gridHeight = 540;
+            } else if (count <= 4) {
+                gridWidth = 1920;
+                gridHeight = 1080;
+            } else {
+                gridWidth = 2880;
+                gridHeight = 1080;
+            }
+            
+            if (addMetadata && this.metadataManager) {
+                progressCallback?.('加载元数据...');
+                // Use first camera for metadata (front camera preferred)
+                const metadataCamera = activeCameras.includes('front') ? 'front' : activeCameras[0];
+                allMetadata = await this.loadMetadataForSegments(clipSegments, metadataCamera, progressCallback);
+                
+                if (allMetadata && allMetadata.length > 0) {
+                    progressCallback?.(this.currentLanguage === 'zh' ? `生成元数据图标覆盖层...` : `Generating metadata overlays...`);
+                    try {
+                        overlayInfo = await metadataOverlayGenerator.generateOverlayPngs(
+                            allMetadata,
+                            clipSegments,
+                            workDir,
+                            gridWidth,
+                            gridHeight,
+                            progressCallback,
+                            this.currentLanguage
+                        );
+                        if (overlayInfo) {
+                            tempFiles.push(overlayInfo.pngDir);
+                            console.log('[FFmpeg Grid] PNG overlays generated:', overlayInfo.pngDir);
+                        }
+                    } catch (pngError) {
+                        console.error('[FFmpeg Grid] PNG overlay generation failed:', pngError);
+                        overlayInfo = null;
+                    }
+                }
+            }
+            
+            // Calculate total duration EARLY - needed for trim filter to prevent FFmpeg hanging
+            const totalDuration = clipSegments.reduce((sum, seg) => {
+                const dur = (seg.clipEnd || 60) - (seg.clipStart || 0);
+                return sum + (dur > 0 ? dur : 0);
+            }, 0);
+            
+            console.log('[FFmpeg Grid] Total duration calculated:', totalDuration, 'seconds');
+            
             // Build filter for grid layout
-            const count = sortedCameras.length;
             let filterComplex = '';
             
             // Camera names for localization
@@ -3079,7 +4919,7 @@ class VideoClipProcessor {
 
             // Scale each input and add label
             for (let i = 0; i < count; i++) {
-                const camName = sortedCameras[i];
+                const camName = activeCameras[i];
                 const labelText = cameraNames[camName]?.[lang] || camName.toUpperCase();
                 
                 // Determine font file path based on OS for labels (use CJK-compatible font)
@@ -3087,16 +4927,20 @@ class VideoClipProcessor {
                 if (navigator.userAgent.includes('Windows')) {
                     fontOption = "fontfile='C\\:/Windows/Fonts/msyh.ttc':";
                 } else if (navigator.userAgent.includes('Mac')) {
-                    fontOption = "fontfile='/System/Library/Fonts/PingFang.ttc':";
+                    // Escape spaces for FFmpeg filter
+                    fontOption = "fontfile='/System/Library/Fonts/Hiragino\\ Sans\\ GB.ttc':";
                 }
 
                 const drawLabel = `drawtext=${fontOption}text='${labelText}':x=10:y=10:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.5`;
-                filterComplex += `[${i}:v]scale=960:540,${drawLabel}[v${i}];`;
+                // Add trim filter to ensure all streams have the same duration, preventing FFmpeg from hanging
+                filterComplex += `[${i}:v]trim=duration=${totalDuration},setpts=PTS-STARTPTS,scale=960:540,setsar=1,fps=24,format=yuv420p,${drawLabel}[v${i}];`;
             }
             
-            // Stack layout
+            // Stack layout - no shortest=1 needed since trim filter ensures equal duration
             let stackFilter = '';
-            if (count === 2) {
+            if (count === 1) {
+                stackFilter = `[v0]null[grid]`;
+            } else if (count === 2) {
                 stackFilter = `[v0][v1]hstack=inputs=2[grid]`;
             } else if (count === 3) {
                 // Top: 2 videos (1920px), Bottom: 1 video (960px) -> Pad bottom to 1920px (center aligned)
@@ -3119,12 +4963,14 @@ class VideoClipProcessor {
             
             filterComplex += stackFilter;
             
+            // Track current output label
+            let currentOutput = 'grid';
+            
             // Add timestamp if needed
-            let finalOutput = '[grid]';
             if (addTimestamp) {
                 // Extract full timestamp (with seconds) from filename
-                const firstFile = clipSegments[0].segment.files[sortedCameras[0]];
-                const fileName = firstFile.name || firstFile.path.split(/[/\\]/).pop();
+                const firstFileRef = clipSegments.find(seg => seg.segment.files[activeCameras[0]])?.segment.files[activeCameras[0]];
+                const fileName = firstFileRef.name || firstFileRef.path.split(/[/\\]/).pop();
                 const fullTimestampMatch = fileName.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
                 
                 let firstSegTime;
@@ -3141,39 +4987,96 @@ class VideoClipProcessor {
                 if (navigator.userAgent.includes('Windows')) {
                     fontOption = "fontfile='C\\:/Windows/Fonts/msyh.ttc':";
                 } else if (navigator.userAgent.includes('Mac')) {
-                    fontOption = "fontfile='/System/Library/Fonts/PingFang.ttc':";
+                    // Escape spaces for FFmpeg filter
+                    fontOption = "fontfile='/System/Library/Fonts/Hiragino\\ Sans\\ GB.ttc':";
                 }
                 
-                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}\\:%Y-%m-%d %H\\\\\\:%M\\\\\\:%S}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
-                filterComplex += `;[grid]${drawtext}[final]`;
-                finalOutput = '[final]';
+                // FFmpeg pts:localtime only accepts 2 arguments (localtime and epoch timestamp)
+                // Time format uses system locale default
+                const drawtext = `drawtext=${fontOption}text='%{pts\\:localtime\\:${startEpoch}}':x=w-text_w-20:y=20:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5`;
+                filterComplex += (filterComplex ? ';' : '') + `[${currentOutput}]${drawtext}[ts]`;
+                currentOutput = 'ts';
             }
             
+            // Add PNG overlay filters for metadata
+            if (overlayInfo && overlayInfo.pngPaths && overlayInfo.pngPaths.size > 0) {
+                const overlayResult = await metadataOverlayGenerator.generateOverlayFilter(
+                    allMetadata,
+                    clipSegments,
+                    overlayInfo.pngPaths,
+                    workDir,
+                    activeCameras.length // Multiple video inputs
+                );
+                
+                if (overlayResult.concatFile) {
+                    // Add background and concat stream to inputs
+                    const bgPath = overlayInfo.pngPaths.get('__background__');
+                    // Use -loop 1 for background image
+                    inputArgs.push('-loop', '1', '-i', bgPath);
+                    const bgIdx = activeCameras.length; // Cameras are 0 to N-1, background is N
+
+                    inputArgs.push('-f', 'concat', '-safe', '0', '-i', overlayResult.concatFile);
+                    const metaIdx = bgIdx + 1;
+
+                    tempFiles.push(overlayResult.concatFile);
+
+                    // Scale down metadata overlay for grid view to match single camera proportions
+                    // Front camera reference: 2896px width video -> 480px box width
+                    // Target grid width: 1920px -> 1920 * (480 / 2896) ≈ 318px
+                    const referenceWidth = 2896;
+                    const scaleFactor = 1920 / referenceWidth;
+                    const scaledBgWidth = Math.round(480 * scaleFactor);
+                    const scaledBgHeight = Math.round(65 * scaleFactor);
+                    
+                    // Overlay background then metadata stream with scaling
+                    const xExpr = '(W-w)/2';
+                    const yExpr = '(H*0.97-h/2)';
+                    const currentLabelStr = `[${currentOutput}]`;
+                    
+                    // Ensure all streams start at PTS 0 and are synchronized
+                    const videoStream = `${currentLabelStr}setpts=PTS-STARTPTS[v_sync]`;
+                    const bgScale = `[${bgIdx}:v]trim=duration=${totalDuration},setpts=PTS-STARTPTS,scale=${scaledBgWidth}:${scaledBgHeight}[bg_scaled]`;
+                    const metaScale = `[${metaIdx}:v]setpts=PTS-STARTPTS,scale=${scaledBgWidth}:${scaledBgHeight}[meta_scaled]`;
+                    
+                    const ovPart = `${videoStream};${bgScale};${metaScale};[v_sync][bg_scaled]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[bg_v];[bg_v][meta_scaled]overlay=x=${xExpr}:y=${yExpr}:eof_action=pass[ov]`;
+                    
+                    filterComplex += (filterComplex ? ';' : '') + ovPart;
+                    currentOutput = 'ov';
+                }
+            }
+            
+            const finalOutput = `[${currentOutput}]`;
+            
+            // Calculate total duration BEFORE building args
+            // Use filter_complex_script to avoid command line length limits on Windows
+            const filterScriptPath = `${workDir}${pathSeparator}ffmpeg_filter_grid_${timestamp}.txt`;
+            await fs.writeTextFile(filterScriptPath, filterComplex);
+            tempFiles.push(filterScriptPath);
+
             const args = [
                 ...inputArgs,
-                '-filter_complex', filterComplex,
+                '-filter_complex_script', filterScriptPath,
                 '-map', finalOutput,
+                '-map', '0:a?',
                 '-c:v', 'libx264',
-                '-preset', 'fast',
+                '-preset', 'veryfast',
                 '-crf', '23',
                 '-r', '24',
+                '-t', String(Math.ceil(totalDuration + 1)),
                 '-y',
                 outputPath
             ];
             
-            console.log('[FFmpeg Grid] Running:', args.join(' '));
-            progressCallback?.('FFmpeg 合成四宫格...');
+            console.log('[FFmpeg Grid] Filter script content (first 500):', filterComplex.substring(0, 500));
+            console.log('[FFmpeg Grid] Filter script content (last 500):', filterComplex.substring(filterComplex.length - 500));
+            console.log('[FFmpeg Grid] Running with', activeCameras.length, 'cameras, duration:', totalDuration);
+            console.log('[FFmpeg Grid] Args:', args.join(' '));
+            progressCallback?.(this.currentLanguage === 'zh' ? 'FFmpeg 合成四宫格...' : 'FFmpeg Merging Grid...');
             
-            const command = this.createFFmpegCommand(args);
-            let output;
-            try {
-                output = await command.execute();
-            } catch (execError) {
-                console.error('[FFmpeg Grid] Execute error:', execError);
-                throw new Error(`FFmpeg 执行失败: ${execError?.message || execError?.toString?.() || '命令执行异常'}`);
-            }
+            const output = await this.executeFFmpegWithProgress(args, totalDuration, progressCallback, this.currentLanguage === 'zh' ? '合成四宫格...' : 'Merging Grid...');
+            progressCallback?.(this.currentLanguage === 'zh' ? '合成四宫格: 100%' : 'Merging Grid: 100%');
             
-            console.log('[FFmpeg Grid] Output:', output);
+            console.log('[FFmpeg Grid] Finished processing grid');
             
             if (output.code !== 0) {
                 throw new Error(`FFmpeg 错误 (code ${output.code}): ${output.stderr || output.stdout || '未知错误'}`);
@@ -3181,14 +5084,26 @@ class VideoClipProcessor {
             
             // Cleanup temp files
             for (const f of tempFiles) {
-                try { await fs.remove(f); } catch(_) {}
+                try { 
+                    if (f.includes('overlay_pngs_')) {
+                        await this.removeDirectory(f, fs);
+                    } else {
+                        await fs.remove(f); 
+                    }
+                } catch(_) {}
             }
             
             return { camera: 'grid', path: outputPath, isFile: true };
             
         } catch (e) {
             for (const f of tempFiles) {
-                try { await fs.remove(f); } catch(_) {}
+                try { 
+                    if (f.includes('overlay_pngs_')) {
+                        await this.removeDirectory(f, fs);
+                    } else {
+                        await fs.remove(f); 
+                    }
+                } catch(_) {}
             }
             try { await fs.remove(outputPath); } catch(_) {}
             throw e;
@@ -3229,12 +5144,21 @@ class VideoClipProcessor {
         return result;
     }
     
-    async processVideoWithTimestamp(clipSegments, camera, totalStartTime, totalEndTime, addTimestamp, eventStartTime, progressCallback, fileHandle = null) {
+    async processVideoWithTimestamp(clipSegments, camera, totalStartTime, totalEndTime, addTimestamp, addMetadata, eventStartTime, progressCallback, fileHandle = null) {
         if (clipSegments.length === 0) {
             throw new Error('没有可用的视频片段');
         }
         
-        progressCallback?.(`处理 ${camera} 摄像头 (${clipSegments.length} 个片段)...`);
+        progressCallback?.(this.currentLanguage === 'zh' ? `处理 ${camera} 摄像头 (${clipSegments.length} 个片段)...` : `Processing ${camera} camera (${clipSegments.length} segments)...`);
+        
+        // Load metadata for all segments if addMetadata is enabled
+        let allMetadata = [];
+        if (addMetadata && this.metadataManager) {
+            progressCallback?.(this.currentLanguage === 'zh' ? '加载行驶数据...' : 'Loading driving data...');
+            allMetadata = await this.loadMetadataForSegments(clipSegments, camera, progressCallback);
+            // Load SVG icons for metadata overlay
+            await this.loadMetadataIcons();
+        }
         
         // Check if we're in Tauri environment
         const isTauri = !!window.__TAURI__;
@@ -3290,8 +5214,9 @@ class VideoClipProcessor {
         let totalChunkSize = 0;
         let writable = null;
         
-        // Write queue system
+        // Write queue system to avoid Promise chain memory leaks
         const writeQueue = [];
+        let writeQueueSize = 0;
         let isWriting = false;
         
         const processWriteQueue = async () => {
@@ -3300,6 +5225,10 @@ class VideoClipProcessor {
             
             while (writeQueue.length > 0) {
                 const blob = writeQueue.shift();
+                if (!blob) {
+                    continue;
+                }
+                writeQueueSize -= blob.size || 0;
                 try {
                     await writable.write(blob);
                 } catch (err) {
@@ -3411,20 +5340,38 @@ class VideoClipProcessor {
                 segmentTime = this.parseTimestamp(clipSegment.timestamp);
             }
             
-            const segmentStartTimestamp = new Date(segmentTime.getTime() + clipSegment.clipStart * 1000);
             const segmentEndTime = clipSegment.clipEnd;
+            
+            // Adjust clipStart if it exceeds video duration
+            const actualClipStart = Math.min(clipSegment.clipStart, video.duration);
+            // Adjust clipEnd based on actual video duration
             const actualEndTime = Math.min(segmentEndTime, video.duration);
+            
+            // Calculate timestamp based on actual clip start
+            const segmentStartTimestamp = new Date(segmentTime.getTime() + actualClipStart * 1000);
+            
+            // Skip this segment if clipStart is already past video duration
+            if (actualClipStart >= video.duration) {
+                console.warn(`Segment ${i + 1}: clipStart (${clipSegment.clipStart}) exceeds video duration (${video.duration}), skipping`);
+                // Release video resources
+                URL.revokeObjectURL(video.src);
+                video.src = '';
+                video.load();
+                continue;
+            }
             
             console.log(`Processing single camera segment ${i + 1}/${clipSegments.length}:`, {
                 clipStart: clipSegment.clipStart,
+                actualClipStart,
                 clipEnd: clipSegment.clipEnd,
                 segmentEndTime,
                 actualEndTime,
-                videoDuration: video.duration
+                videoDuration: video.duration,
+                actualDuration: actualEndTime - actualClipStart
             });
             
             // Seek to clip start position
-            video.currentTime = clipSegment.clipStart;
+            video.currentTime = actualClipStart;
             await new Promise((resolve) => {
                 video.onseeked = resolve;
             });
@@ -3451,7 +5398,7 @@ class VideoClipProcessor {
                             this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
                             
                             if (addTimestamp) {
-                                const currentTime = new Date(segmentStartTimestamp.getTime() + (video.currentTime - clipSegment.clipStart) * 1000);
+                                const currentTime = new Date(segmentStartTimestamp.getTime() + (video.currentTime - actualClipStart) * 1000);
                                 const timeString = currentTime.toLocaleString('zh-CN', {
                                     year: 'numeric',
                                     month: '2-digit',
@@ -3463,6 +5410,12 @@ class VideoClipProcessor {
                                 }).replace(/\//g, '-');
                                 
                                 this.drawTimestamp(timeString);
+                            }
+                            
+                            // Draw metadata overlay if enabled
+                            if (addMetadata && allMetadata.length > 0) {
+                                const metadataData = this.getMetadataAtTime(allMetadata, i, video.currentTime);
+                                this.drawMetadata(metadataData, this.currentLanguage);
                             }
                             
                             processedFrames++;
@@ -3515,7 +5468,7 @@ class VideoClipProcessor {
                         this.ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
                         
                         if (addTimestamp) {
-                            const currentTime = new Date(segmentStartTimestamp.getTime() + (t - clipSegment.clipStart) * 1000);
+                            const currentTime = new Date(segmentStartTimestamp.getTime() + (t - actualClipStart) * 1000);
                             const timeString = currentTime.toLocaleString('zh-CN', {
                                 year: 'numeric',
                                 month: '2-digit',
@@ -3527,6 +5480,12 @@ class VideoClipProcessor {
                             }).replace(/\//g, '-');
                             
                             this.drawTimestamp(timeString);
+                        }
+                        
+                        // Draw metadata overlay if enabled
+                        if (addMetadata && allMetadata.length > 0) {
+                            const metadataData = this.getMetadataAtTime(allMetadata, i, t);
+                            this.drawMetadata(metadataData, this.currentLanguage);
                         }
                         
                         processedFrames++;
@@ -3588,7 +5547,21 @@ class VideoClipProcessor {
         }
         
         if (result.saved) {
-             return result;
+            // For streamed files, try to use FFmpeg to fix metadata
+            // If FFmpeg fails, the video is still playable (just without accurate duration)
+            if (fileHandle) {
+                try {
+                    const fixed = await this.fixWebmWithFFmpeg(fileHandle, progressCallback);
+                    if (!fixed) {
+                        console.warn('[Grid Video Export] FFmpeg metadata fix failed, video may have inaccurate duration');
+                        progressCallback?.('视频已保存（元数据修复跳过）');
+                    }
+                } catch (e) {
+                    console.warn('[Grid Video Export] FFmpeg metadata fix error:', e);
+                    progressCallback?.('视频已保存（元数据修复跳过）');
+                }
+            }
+            return result;
         }
 
         progressCallback?.('修复视频元数据...');
@@ -3597,8 +5570,18 @@ class VideoClipProcessor {
         return fixedBlob;
     }
     
-    async createGridVideoFromSegments(clipSegments, cameras, totalStartTime, totalEndTime, addTimestamp, eventStartTime, progressCallback, fileHandle = null) {
-        progressCallback?.(`准备四宫格视频 (${clipSegments.length} 个片段)...`);
+    async createGridVideoFromSegments(clipSegments, cameras, totalStartTime, totalEndTime, addTimestamp, addMetadata, eventStartTime, progressCallback, fileHandle = null) {
+        progressCallback?.(this.currentLanguage === 'zh' ? `准备四宫格视频 (${clipSegments.length} 个片段)...` : `Preparing grid video (${clipSegments.length} segments)...`);
+        
+        // Load metadata for all segments if addMetadata is enabled
+        let allMetadata = [];
+        if (addMetadata && this.metadataManager) {
+            progressCallback?.(this.currentLanguage === 'zh' ? '加载行驶数据...' : 'Loading driving data...');
+            // Use front camera for metadata (it's the same for all cameras)
+            allMetadata = await this.loadMetadataForSegments(clipSegments, cameras[0], progressCallback);
+            // Load SVG icons for metadata overlay
+            await this.loadMetadataIcons();
+        }
         
         // Check if we're in Tauri environment
         const isTauri = !!window.__TAURI__;
@@ -3852,31 +5835,74 @@ class VideoClipProcessor {
                 segmentTime = this.parseTimestamp(clipSegment.timestamp);
             }
             
-            const segmentStartTimestamp = new Date(segmentTime.getTime() + clipSegment.clipStart * 1000);
             const segmentEndTime = clipSegment.clipEnd;
             
             const videoEntries = Object.entries(videos);
             const firstVideo = videoEntries[0][1];
             
+            // Adjust clipStart if it exceeds video duration
+            const actualClipStart = Math.min(clipSegment.clipStart, firstVideo.duration);
+            // Adjust clipEnd based on actual video duration
+            const actualEndTime = Math.min(segmentEndTime, firstVideo.duration);
+            
+            // Calculate timestamp based on actual clip start
+            const segmentStartTimestamp = new Date(segmentTime.getTime() + actualClipStart * 1000);
+            
+            // Skip this segment if clipStart is already past video duration
+            if (actualClipStart >= firstVideo.duration) {
+                console.warn(`Grid segment ${i + 1}: clipStart (${clipSegment.clipStart}) exceeds video duration (${firstVideo.duration}), skipping`);
+                // Release video resources
+                for (const video of Object.values(videos)) {
+                    URL.revokeObjectURL(video.src);
+                    video.src = '';
+                    video.load();
+                }
+                continue;
+            }
+            
             console.log(`Processing segment ${i + 1}/${clipSegments.length}:`, {
                 clipStart: clipSegment.clipStart,
+                actualClipStart,
                 clipEnd: clipSegment.clipEnd,
                 clipDuration: clipSegment.clipDuration,
                 segmentEndTime,
-                videoDuration: firstVideo.duration
+                actualEndTime,
+                videoDuration: firstVideo.duration,
+                actualDuration: actualEndTime - actualClipStart
             });
             
-            // Seek all videos to clip start position
-            for (const video of Object.values(videos)) {
-                video.currentTime = clipSegment.clipStart;
-                video.playbackRate = 1.0;
-            }
+            // Seek all videos to clip start position with timeout
+            const seekWithTimeout = (video, targetTime, timeout = 5000) => {
+                return new Promise((resolve) => {
+                    // If already at target position (within tolerance), resolve immediately
+                    if (Math.abs(video.currentTime - targetTime) < 0.1) {
+                        video.playbackRate = 1.0;
+                        resolve();
+                        return;
+                    }
+                    
+                    const timeoutId = setTimeout(() => {
+                        console.warn(`[Grid] Seek timeout for video, forcing continue`);
+                        video.onseeked = null;
+                        resolve();
+                    }, timeout);
+                    
+                    video.onseeked = () => {
+                        clearTimeout(timeoutId);
+                        video.onseeked = null;
+                        resolve();
+                    };
+                    
+                    video.playbackRate = 1.0;
+                    video.currentTime = targetTime;
+                });
+            };
+            
             await Promise.all(Object.values(videos).map(video => 
-                new Promise(resolve => { video.onseeked = resolve; })
+                seekWithTimeout(video, actualClipStart)
             ));
             
-            const actualEndTime = Math.min(segmentEndTime, firstVideo.duration);
-            const segmentDuration = actualEndTime - clipSegment.clipStart;
+            const segmentDuration = actualEndTime - actualClipStart;
             const segmentFrameCount = Math.ceil(segmentDuration * FPS);
             console.log(`Segment ${i + 1}: clipStart=${clipSegment.clipStart}, actualEndTime=${actualEndTime}, segmentDuration=${segmentDuration}s, expectedFrames=${segmentFrameCount}`);
             
@@ -3923,7 +5949,7 @@ class VideoClipProcessor {
                         const labelX = offsetX + 4;
                         const labelY = item.y + 4;
                         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                        this.ctx.font = 'bold 12px Arial';
+                        this.ctx.font = 'bold 12px "Noto Sans SC", Arial';
                         const lang = this.currentLanguage || 'zh';
                         const cameraNames = {
                             front: { en: 'Front', zh: '前视' },
@@ -3969,7 +5995,7 @@ class VideoClipProcessor {
                 const labelX = x + 4;
                 const labelY = y + 4;
                 this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                this.ctx.font = 'bold 12px Arial';
+                this.ctx.font = 'bold 12px "Noto Sans SC", Arial';
                 
                 const lang = this.currentLanguage || 'zh';
                 const cameraNames = {
@@ -4001,7 +6027,7 @@ class VideoClipProcessor {
             
             // Draw timestamp if needed
             if (addTimestamp) {
-                const currentTime = new Date(segmentStartTimestamp.getTime() + (videoTime - clipSegment.clipStart) * 1000);
+                const currentTime = new Date(segmentStartTimestamp.getTime() + (videoTime - actualClipStart) * 1000);
                 const timeString = currentTime.toLocaleString('zh-CN', {
                     year: 'numeric',
                     month: '2-digit',
@@ -4012,7 +6038,7 @@ class VideoClipProcessor {
                     hour12: false
                 }).replace(/\//g, '-');
                 
-                this.ctx.font = 'bold 20px Arial';
+                this.ctx.font = 'bold 20px "Noto Sans SC", Arial';
                 const textWidth = this.ctx.measureText(timeString).width;
                 const padding = 10;
                 const boxWidth = textWidth + padding * 2;
@@ -4035,6 +6061,7 @@ class VideoClipProcessor {
                 const tsX = targetX + cellWidth - boxWidth - margin - extraLeft;
                 const tsY = targetY + margin;
 
+
                 
                 this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
                 this.ctx.fillRect(tsX, tsY, boxWidth, boxHeight);
@@ -4046,6 +6073,12 @@ class VideoClipProcessor {
                 this.ctx.textAlign = 'left';
 
             }
+            
+            // Draw metadata overlay if enabled (at bottom center of grid)
+            if (addMetadata && allMetadata.length > 0) {
+                const metadataData = this.getMetadataAtTime(allMetadata, i, videoTime);
+                this.drawMetadata(metadataData, this.currentLanguage);
+            }
 
 
         };
@@ -4056,18 +6089,34 @@ class VideoClipProcessor {
                 await new Promise((resolve) => {
                     let resolved = false;
                     const masterVideo = firstVideo;
+                    let lastFrameTime = Date.now();
+                    let stuckCheckInterval = null;
                     
                     const stopAll = () => {
                         if (resolved) return;
                         resolved = true;
+                        if (stuckCheckInterval) clearInterval(stuckCheckInterval);
                         for (const video of Object.values(videos)) {
                             video.pause();
                         }
                         resolve();
                     };
                     
+                    // Check if video is stuck (no frame for 10 seconds)
+                    stuckCheckInterval = setInterval(() => {
+                        if (resolved) {
+                            clearInterval(stuckCheckInterval);
+                            return;
+                        }
+                        if (Date.now() - lastFrameTime > 10000) {
+                            console.warn(`[Grid] Video playback stuck, forcing continue. currentTime=${masterVideo.currentTime}, targetEnd=${actualEndTime}`);
+                            stopAll();
+                        }
+                    }, 2000);
+                    
                     const onFrame = () => {
                         if (resolved) return;
+                        lastFrameTime = Date.now();
                         
                         const t = masterVideo.currentTime;
                         if (t >= actualEndTime - 0.02 || masterVideo.ended) {
@@ -4076,10 +6125,12 @@ class VideoClipProcessor {
                         }
                         
                         // Light sync: if other cameras drift too much, correct occasionally
+                        // Skip videos that have ended or if target time exceeds their duration
                         for (const video of Object.values(videos)) {
                             if (video === masterVideo) continue;
+                            if (video.ended || t >= video.duration) continue; // Skip ended videos
                             if (Math.abs(video.currentTime - t) > 0.15) {
-                                video.currentTime = t;
+                                video.currentTime = Math.min(t, video.duration - 0.1);
                             }
                         }
                         
@@ -4094,9 +6145,18 @@ class VideoClipProcessor {
                         masterVideo.requestVideoFrameCallback(onFrame);
                     };
                     
-                    Promise.all(Object.values(videos).map(v => v.play().catch(() => null)))
+                    Promise.all(Object.values(videos).map(v => v.play().catch((e) => {
+                        console.warn('[Grid] Video play failed:', e);
+                        return null;
+                    })))
                         .then(() => {
-                            masterVideo.requestVideoFrameCallback(onFrame);
+                            if (!resolved) {
+                                masterVideo.requestVideoFrameCallback(onFrame);
+                            }
+                        })
+                        .catch((e) => {
+                            console.error('[Grid] Failed to start video playback:', e);
+                            stopAll();
                         });
                 });
             } else {
@@ -4105,18 +6165,34 @@ class VideoClipProcessor {
                     let resolved = false;
                     const masterVideo = firstVideo;
                     const frameInterval = 1000 / FPS;
+                    let lastTickTime = Date.now();
+                    let stuckCheckInterval = null;
                     
                     const stopAll = () => {
                         if (resolved) return;
                         resolved = true;
+                        if (stuckCheckInterval) clearInterval(stuckCheckInterval);
                         for (const video of Object.values(videos)) {
                             video.pause();
                         }
                         resolve();
                     };
                     
+                    // Check if video is stuck (no tick for 10 seconds)
+                    stuckCheckInterval = setInterval(() => {
+                        if (resolved) {
+                            clearInterval(stuckCheckInterval);
+                            return;
+                        }
+                        if (Date.now() - lastTickTime > 10000) {
+                            console.warn(`[Grid] Video playback stuck (fallback mode), forcing continue`);
+                            stopAll();
+                        }
+                    }, 2000);
+                    
                     const tick = () => {
                         if (resolved) return;
+                        lastTickTime = Date.now();
                         const t = masterVideo.currentTime;
                         if (t >= actualEndTime - 0.02 || masterVideo.ended) {
                             stopAll();
@@ -4132,9 +6208,18 @@ class VideoClipProcessor {
                         setTimeout(tick, frameInterval);
                     };
                     
-                    Promise.all(Object.values(videos).map(v => v.play().catch(() => null)))
+                    Promise.all(Object.values(videos).map(v => v.play().catch((e) => {
+                        console.warn('[Grid] Video play failed (fallback):', e);
+                        return null;
+                    })))
                         .then(() => {
-                            tick();
+                            if (!resolved) {
+                                tick();
+                            }
+                        })
+                        .catch((e) => {
+                            console.error('[Grid] Failed to start video playback (fallback):', e);
+                            stopAll();
                         });
                 });
             }
@@ -4203,7 +6288,21 @@ class VideoClipProcessor {
         }
         
         if (result.saved) {
-             return result;
+            // For streamed files, try to use FFmpeg to fix metadata
+            // If FFmpeg fails, the video is still playable (just without accurate duration)
+            if (fileHandle) {
+                try {
+                    const fixed = await this.fixWebmWithFFmpeg(fileHandle, progressCallback);
+                    if (!fixed) {
+                        console.warn('[Grid Video Export] FFmpeg metadata fix failed, video may have inaccurate duration');
+                        progressCallback?.('视频已保存（元数据修复跳过）');
+                    }
+                } catch (e) {
+                    console.warn('[Grid Video Export] FFmpeg metadata fix error:', e);
+                    progressCallback?.('视频已保存（元数据修复跳过）');
+                }
+            }
+            return result;
         }
 
         progressCallback?.('修复视频元数据...');
@@ -4213,14 +6312,21 @@ class VideoClipProcessor {
     }
     
     drawTimestamp(timeString) {
+        // Dynamic scaling
+        const referenceWidth = 2896;
+        const scale = this.canvas.width / referenceWidth;
+        
+        const fontSize = Math.round(28 * scale);
+        const padding = 15 * scale;
+        const boxHeight = 40 * scale;
+        const margin = 20 * scale;
+        
         // Measure text width
-        this.ctx.font = 'bold 28px Arial';
+        this.ctx.font = `bold ${fontSize}px "Noto Sans SC", Arial`;
         const textWidth = this.ctx.measureText(timeString).width;
-        const padding = 15;
         const boxWidth = textWidth + padding * 2;
-        const boxHeight = 40;
-        const x = this.canvas.width - boxWidth - 20;
-        const y = 20;
+        const x = this.canvas.width - boxWidth - margin;
+        const y = margin;
         
         // Draw background (top-right corner)
         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
@@ -4228,9 +6334,384 @@ class VideoClipProcessor {
         
         // Draw text
         this.ctx.fillStyle = '#fff';
-        this.ctx.fillText(timeString, x + padding, y + 30);
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(timeString, x + padding, y + boxHeight / 2);
     }
     
+    // Load metadata for all segments
+    async loadMetadataForSegments(clipSegments, camera, progressCallback = null) {
+        const allMetadata = [];
+        
+        for (let i = 0; i < clipSegments.length; i++) {
+            if (this.isCancelled) throw new Error('导出已取消');
+            if (progressCallback) {
+                progressCallback(`读取视频数据 ${i + 1}/${clipSegments.length}...`);
+            }
+            const clipSegment = clipSegments[i];
+            const videoFile = clipSegment.segment.files[camera];
+            
+            if (!videoFile) continue;
+            
+            try {
+                let buffer;
+                if (videoFile instanceof File) {
+                    buffer = await videoFile.arrayBuffer();
+                } else if (videoFile.path && window.__TAURI__) {
+                    const fs = window.__TAURI__.fs;
+                    const data = await fs.readFile(videoFile.path);
+                    buffer = data.buffer;
+                } else if (videoFile.path || videoFile.name) {
+                    const response = await fetch(getFileUrl(videoFile));
+                    buffer = await response.arrayBuffer();
+                } else {
+                    continue;
+                }
+                
+                const parser = new DashcamMP4(buffer);
+                const rawMetadata = parser.parseMetadata();
+                
+                if (this.metadataManager && this.metadataManager.SeiMetadata) {
+                    const segmentMetadata = rawMetadata.map(item => {
+                        try {
+                            const decoded = this.metadataManager.SeiMetadata.decode(item.data);
+                            return {
+                                time: item.time,
+                                segmentIndex: i,
+                                data: this.metadataManager.SeiMetadata.toObject(decoded, { enums: String, longs: String })
+                            };
+                        } catch (e) {
+                            return null;
+                        }
+                    }).filter(Boolean);
+                    
+                    allMetadata.push({
+                        segmentIndex: i,
+                        clipStart: clipSegment.clipStart,
+                        clipEnd: clipSegment.clipEnd,
+                        metadata: segmentMetadata
+                    });
+                }
+            } catch (e) {
+                console.warn(`[Metadata] Failed to load metadata for segment ${i}:`, e);
+            }
+        }
+        
+        return allMetadata;
+    }
+    
+    // Get metadata for a specific time within a segment
+    getMetadataAtTime(allMetadata, segmentIndex, currentTime) {
+        const segmentData = allMetadata.find(m => m.segmentIndex === segmentIndex);
+        if (!segmentData || !segmentData.metadata || segmentData.metadata.length === 0) {
+            return null;
+        }
+        
+        // Find the metadata item closest to current time
+        let bestMatch = segmentData.metadata[0];
+        for (const item of segmentData.metadata) {
+            if (item.time <= currentTime) {
+                bestMatch = item;
+            } else {
+                break;
+            }
+        }
+        
+        return bestMatch?.data || null;
+    }
+    
+    // Draw metadata overlay at bottom center with SVG icons
+    /**
+     * Draw metadata overlay on canvas
+     */
+    drawMetadata(metadataData, lang = 'zh') {
+        if (!metadataData) return;
+        
+        const d = metadataData;
+        
+        // Dynamic scaling based on reference: 480px width box is "just right" for 2896px width video
+        const referenceWidth = 2896;
+        const scale = this.canvas.width / referenceWidth;
+        
+        const barWidth = 480 * scale;
+        const barHeight = 65 * scale;
+        const iconSize = 30 * scale;
+        const borderRadius = 16 * scale;
+        const fontSize = 24 * scale;
+        
+        // Position: Bottom center
+        const x = (this.canvas.width - barWidth) / 2;
+        const y = this.canvas.height - barHeight - (20 * scale);
+        
+        // Draw background bar (Glassmorphism effect)
+        this.ctx.save();
+        const gradient = this.ctx.createLinearGradient(x, y, x, y + barHeight);
+        gradient.addColorStop(0, 'rgba(20, 20, 20, 0.3)');
+        gradient.addColorStop(1, 'rgba(5, 5, 5, 0.35)');
+        this.ctx.fillStyle = gradient;
+        
+        this.ctx.beginPath();
+        if (this.ctx.roundRect) {
+            this.ctx.roundRect(x, y, barWidth, barHeight, borderRadius);
+        } else {
+            const r = borderRadius;
+            this.ctx.moveTo(x + r, y);
+            this.ctx.lineTo(x + barWidth - r, y);
+            this.ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + r);
+            this.ctx.lineTo(x + barWidth, y + barHeight - r);
+            this.ctx.quadraticCurveTo(x + barWidth, y + barHeight, x + barWidth - r, y + barHeight);
+            this.ctx.lineTo(x + r, y + barHeight);
+            this.ctx.quadraticCurveTo(x, y + barHeight, x, y + barHeight - r);
+            this.ctx.lineTo(x, y + r);
+            this.ctx.quadraticCurveTo(x, y, x + r, y);
+        }
+        this.ctx.fill();
+        this.ctx.restore();
+        
+        const yCenter = y + barHeight / 2;
+        
+        // Speed
+        const speedKmh = Math.round((d.vehicleSpeedMps || 0) * 3.6);
+        const speedDisplay = speedKmh >= 150 ? '150+' : `${speedKmh}`;
+        const speedText = `${speedDisplay} km/h`;
+        
+        // Gear
+        const gearMap = {
+            'GEAR_PARK': 'P',
+            'GEAR_DRIVE': 'D',
+            'GEAR_REVERSE': 'R',
+            'GEAR_NEUTRAL': 'N'
+        };
+        const gear = gearMap[d.gearState] || '--';
+        const gearText = `[${gear}]`;
+        
+        // Steering bucket
+        const steeringAngle = Math.round(d.steeringWheelAngle || 0);
+        const steeringBucket = Math.round(steeringAngle / 10) * 10;
+        const autopilotState = d.autopilotState || 'NONE';
+        
+        // Accelerator bucket
+        const accelPercent = Math.round(d.acceleratorPedalPosition || 0);
+        const accelBucket = Math.floor(accelPercent / 10) * 10;
+        
+        // Draw items (Using SCALED COORDINATES)
+        this.ctx.save();
+        this.ctx.font = `bold ${fontSize}px "Noto Sans SC", Arial, sans-serif`;
+        this.ctx.textBaseline = 'middle';
+        
+        // Speed (Scaled at 125)
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.textAlign = 'right';
+        this.ctx.fillText(speedText, x + 125 * scale, yCenter);
+        
+        // Gear (Scaled at 145)
+        this.ctx.textAlign = 'left';
+        let gearColor = '#ffffff';
+        if (gear === 'D') gearColor = '#52c41a';
+        else if (gear === 'R') gearColor = '#ff4d4f';
+        this.ctx.fillStyle = gearColor;
+        this.ctx.fillText(gearText, x + 145 * scale, yCenter);
+        
+        // Blinkers
+        this.drawLeftArrow(this.ctx, x + 200 * scale, yCenter, iconSize, d.blinkerOnLeft);
+        this.drawRightArrow(this.ctx, x + 240 * scale, yCenter, iconSize, d.blinkerOnRight);
+        
+        // Brake (Fixed at 290)
+        this.drawBrakeIcon(this.ctx, x + 290 * scale, yCenter, iconSize, d.brakeApplied);
+        
+        // Accel (Fixed at 340, no percentage text, only icon)
+        this.drawAcceleratorIcon(this.ctx, x + 340 * scale, yCenter, iconSize, accelBucket);
+        
+        // Steering Wheel (Fixed at 390)
+        this.drawSteeringWheelIcon(this.ctx, x + 390 * scale, yCenter, iconSize, steeringBucket, autopilotState);
+        
+        this.ctx.restore();
+    }
+
+    // Helper: draw left arrow
+    drawLeftArrow(ctx, x, y, size, active) {
+        const color = active ? '#52c41a' : 'rgba(255,255,255,0.2)';
+        ctx.save();
+        if (active) {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = 'rgba(82, 196, 26, 0.4)';
+        }
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        const halfSize = size / 2;
+        ctx.moveTo(x + size * 0.9, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 1.1, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 1.1, y - halfSize * 0.8);
+        ctx.lineTo(x + size * 0.1, y);
+        ctx.lineTo(x + halfSize * 1.1, y + halfSize * 0.8);
+        ctx.lineTo(x + halfSize * 1.1, y + halfSize * 0.4);
+        ctx.lineTo(x + size * 0.9, y + halfSize * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // Helper: draw right arrow
+    drawRightArrow(ctx, x, y, size, active) {
+        const color = active ? '#52c41a' : 'rgba(255,255,255,0.2)';
+        ctx.save();
+        if (active) {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = 'rgba(82, 196, 26, 0.4)';
+        }
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        const halfSize = size / 2;
+        ctx.moveTo(x + size * 0.1, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 0.9, y - halfSize * 0.4);
+        ctx.lineTo(x + halfSize * 0.9, y - halfSize * 0.8);
+        ctx.lineTo(x + size * 0.9, y);
+        ctx.lineTo(x + halfSize * 0.9, y + halfSize * 0.8);
+        ctx.lineTo(x + halfSize * 0.9, y + halfSize * 0.4);
+        ctx.lineTo(x + size * 0.1, y + halfSize * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // Helper: draw brake icon (brake pedal shape from SVG)
+    drawBrakeIcon(ctx, x, y, size, active) {
+        const color = active ? '#ff4d4f' : 'rgba(255,255,255,0.4)';
+        ctx.save();
+        
+        try {
+            if (active) {
+                ctx.shadowBlur = 6;
+                ctx.shadowColor = 'rgba(255, 77, 79, 0.5)';
+            }
+            ctx.fillStyle = color;
+            
+            // 绘制图标，居中对齐 - 使用较大尺寸
+            const iconSize = size * 1.5;
+            const iconX = x + (size - iconSize) / 2;
+            const iconY = y - iconSize / 2;
+            
+            // SVG viewBox是0 0 1024 1024，路径实际范围约 x:140-880, y:162-861
+            const svgSize = 1024;
+            const pathWidth = 880 - 140;
+            const pathHeight = 861 - 162;
+            const pathCenterX = 140 + pathWidth / 2;
+            const pathCenterY = 162 + pathHeight / 2;
+            
+            const scale = iconSize / svgSize;
+            
+            // 将路径中心移到图标中心
+            ctx.translate(iconX + iconSize / 2, iconY + iconSize / 2);
+            ctx.scale(scale, scale);
+            ctx.translate(-pathCenterX, -pathCenterY);
+            
+            const path = new Path2D('M821.394 861.482H200.242c-23.709 0-44.013-20.191-45.124-44.975 0 0-30.555-129.896-30.044-166.228 0.325-23.102 15.23-164.3 15.23-164.3 2.449-27.739 18.019-48.258 42.686-48.258h646.233c24.667 0 44.357 21.769 43.759 48.258l14.579 163.622-22.043 166.906c-0.56 24.784-20.414 44.975-44.124 44.975z m24.716-358.364l0.292-10.498c0.23-8.275-6.452-15.059-14.85-15.059H186.497c-8.397 0-14.828 6.784-14.291 15.059l0.681 10.498c0.534 8.232 7.802 14.954 16.153 14.954h641.472c8.35 0 15.37-6.722 15.598-14.954z m8.739 81.304l0.296-10.264c0.233-8.091-6.628-14.724-15.248-14.724H177.735c-8.62 0-15.226 6.633-14.681 14.724l0.691 10.264c0.542 8.049 7.999 14.622 16.571 14.622H838.84c8.574 0 15.777-6.572 16.009-14.622z m6.172 79.506l0.298-10.038c0.235-7.912-6.747-14.399-15.516-14.399H172.234c-8.769 0-15.494 6.487-14.945 14.399l0.695 10.038c0.545 7.872 8.126 14.3 16.847 14.3h669.91c8.721 0 16.047-6.428 16.28-14.3z m-14.901 77.765l0.282-9.819c0.222-7.74-6.466-14.085-14.863-14.085H186.526c-8.397 0-14.841 6.345-14.322 14.085l0.659 9.819c0.517 7.701 7.772 13.989 16.123 13.989h641.548c8.351 0 15.365-6.288 15.586-13.989z m-8.749 76.081l0.267-9.608c0.21-7.573-6.189-13.781-14.222-13.781H206.385c-8.033 0-14.202 6.208-13.711 13.781l0.623 9.608c0.489 7.535 7.425 13.688 15.415 13.688h613.751c7.99 0.001 14.698-6.152 14.908-13.688z m1.869-378.856l36.038-94.167 21.623-119.775H785.183L752.749 356.56l-118.926 82.358H839.24z');
+            ctx.fill(path);
+        } catch (err) {
+            console.error('[drawBrakeIcon Web] Error:', err);
+        }
+        
+        ctx.restore();
+    }
+
+    // Helper: draw accelerator icon
+    drawAcceleratorIcon(ctx, x, y, size, percent) {
+        const active = percent > 0;
+        const rectWidth = size * 0.6;
+        const rectHeight = size * 0.9;
+        const rectX = x + (size - rectWidth) / 2;
+        const rectY = y - rectHeight / 2;
+        const cornerRadius = 3;
+        
+        ctx.save();
+        ctx.strokeStyle = active ? '#52c41a' : 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 2;
+        this.drawRoundedRect(ctx, rectX, rectY, rectWidth, rectHeight, cornerRadius);
+        ctx.stroke();
+        
+        if (active) {
+            const fillHeight = (percent / 100) * (rectHeight - 4);
+            const fillY = rectY + rectHeight - 2 - fillHeight;
+            ctx.fillStyle = '#52c41a';
+            this.drawRoundedRect(ctx, rectX + 2, fillY, rectWidth - 4, fillHeight, 1);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    // Helper: draw steering wheel icon
+    drawSteeringWheelIcon(ctx, x, y, size, angle, autopilotState) {
+        let color = 'rgba(255,255,255,0.9)';
+        let shadowColor = 'transparent';
+        if (autopilotState === 'SELF_DRIVING') {
+            color = '#52c41a';
+            shadowColor = 'rgba(82, 196, 26, 0.5)';
+        } else if (autopilotState === 'AUTOSTEER' || autopilotState === 'TACC') {
+            color = '#1890ff';
+            shadowColor = 'rgba(24, 144, 255, 0.5)';
+        }
+        
+        ctx.save();
+        if (shadowColor !== 'transparent') {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = shadowColor;
+        }
+        
+        const cx = x + size / 2;
+        const cy = y;
+        ctx.translate(cx, cy);
+        ctx.rotate((angle * Math.PI) / 180);
+        
+        const scale = size / 64;
+        const r = 28 * scale;
+        const hubR = 9 * scale;
+        const strokeWidth = 5 * scale;
+        const spokeHeight = 8 * scale;
+        const spokeWidth = 19 * scale;
+        const spokeRx = 2 * scale;
+        
+        ctx.strokeStyle = color;
+        ctx.lineWidth = strokeWidth;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, 0, hubR, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Left spoke
+        this.drawRoundedRect(ctx, -r - strokeWidth / 2, -spokeHeight / 2, spokeWidth, spokeHeight, spokeRx);
+        ctx.fill();
+        // Right spoke
+        this.drawRoundedRect(ctx, r - spokeWidth + strokeWidth / 2, -spokeHeight / 2, spokeWidth, spokeHeight, spokeRx);
+        ctx.fill();
+        // Bottom spoke
+        this.drawRoundedRect(ctx, -spokeHeight / 2, hubR, spokeHeight, spokeWidth, spokeRx);
+        ctx.fill();
+        
+        ctx.restore();
+    }
+
+    // Helper: draw rounded rectangle
+    drawRoundedRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(x, y, width, height, radius);
+        } else {
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+    }
+
     parseTimestamp(timestamp) {
         // Handles "2024-01-01_12-00-00" format
         const [datePart, timePart] = timestamp.split('_');
@@ -4272,6 +6753,8 @@ class TeslaCamViewer {
             downloadFileBtn: document.getElementById('downloadFileBtn'),
             metadataSwitchBtn: document.getElementById('metaSwitchBtn'),
             headerLocationDisplay: document.getElementById('headerLocationDisplay'),
+            headerMenuBtn: document.getElementById('headerMenuBtn'),
+            headerRight: document.getElementById('headerRight'),
             // Clip modal elements
             clipModal: document.getElementById('clipModal'),
             clipModalTitle: document.getElementById('clipModalTitle'),
@@ -4440,6 +6923,21 @@ class TeslaCamViewer {
         });
         this.dom.themeToggleBtn.addEventListener('click', () => this.toggleTheme());
         this.dom.langToggleBtn.addEventListener('click', () => this.toggleLanguage());
+        
+        if (this.dom.headerMenuBtn) {
+            this.dom.headerMenuBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.dom.headerRight.classList.toggle('active');
+            });
+            
+            // 点击外部关闭菜单
+            document.addEventListener('click', () => {
+                if (this.dom.headerRight.classList.contains('active')) {
+                    this.dom.headerRight.classList.remove('active');
+                }
+            });
+        }
+
         document.addEventListener('keydown', (e) => this.handleGlobalKeydown(e));
 
         window.addEventListener('resize', () => this.handleResize());
@@ -4986,7 +7484,12 @@ class TeslaCamViewer {
 
     updateThemeIcon(isDark) {
         if (this.dom.themeToggleBtn) {
-            this.dom.themeToggleBtn.textContent = isDark ? '🌙' : '☀️';
+            const iconEl = this.dom.themeToggleBtn.querySelector('.btn-icon');
+            if (iconEl) {
+                iconEl.textContent = isDark ? '🌙' : '☀️';
+            } else {
+                this.dom.themeToggleBtn.textContent = isDark ? '🌙' : '☀️';
+            }
             this.dom.themeToggleBtn.title = i18n[this.currentLanguage][isDark ? 'toggleDay' : 'toggleNight'];
         }
     }
@@ -5402,7 +7905,15 @@ class TeslaCamViewer {
         if (!translations) return;
 
         document.title = translations.pageTitle;
-        this.dom.langToggleBtn.textContent = lang === 'zh' ? 'En' : '中';
+        
+        // Update language toggle button text
+        const langIconEl = this.dom.langToggleBtn.querySelector('.btn-icon');
+        if (langIconEl) {
+            langIconEl.textContent = lang === 'zh' ? 'En' : '中';
+        } else {
+            this.dom.langToggleBtn.textContent = lang === 'zh' ? 'En' : '中';
+        }
+        
         this.dom.langToggleBtn.title = translations.toggleLanguage;
         this.dom.themeToggleBtn.title = translations.toggleTheme;
         this.dom.toggleSidebarBtn.title = translations.toggleSidebar;
@@ -5411,6 +7922,9 @@ class TeslaCamViewer {
         this.dom.googleMapBtn.textContent = translations.googleMap;
         this.dom.revealFileBtn.title = translations.revealFile;
         this.dom.downloadFileBtn.title = translations.downloadFile;
+        if (this.dom.headerMenuBtn) {
+            this.dom.headerMenuBtn.title = translations.moreOptions;
+        }
 
         document.querySelector('.sidebar-header .header-title span').textContent = translations.headerTitle;
         document.querySelector('.filter-group label[for="dateFilter"]').textContent = translations.date;
@@ -5434,10 +7948,11 @@ class TeslaCamViewer {
         document.querySelectorAll('[data-i18n="grid4"]').forEach(el => el.textContent = translations.grid4);
         document.querySelectorAll('[data-i18n="legacy"]').forEach(el => el.textContent = translations.legacy);
 
-        // Update Metadata Panel
+        // Update Metadata Panel and Buttons
         const metadataKeys = [
             'metadata', 'loadingMetadata', 'noMetadata', 'speed', 'gear', 'steering', 
-            'accelerator', 'brake', 'blinker', 'autopilot', 'gps', 'heading', 'acceleration'
+            'accelerator', 'brake', 'blinker', 'autopilot', 'gps', 'heading', 'acceleration',
+            'revealFile', 'downloadFile', 'toggleTheme', 'toggleLanguage'
         ];
         metadataKeys.forEach(key => {
             document.querySelectorAll(`[data-i18n="${key}"]`).forEach(el => {
@@ -5733,6 +8248,7 @@ class TeslaCamViewer {
         // Update labels
         document.getElementById('selectCamerasLabel').textContent = translations.selectCameras;
         document.getElementById('addTimestampLabel').textContent = translations.addTimestamp;
+        document.getElementById('addMetadataLabel').textContent = translations.addMetadata;
         document.getElementById('mergeVideosLabel').textContent = translations.mergeVideos;
         this.dom.startClipBtn.textContent = translations.startExport;
         this.dom.cancelClipBtn.textContent = translations.cancel;
@@ -5854,6 +8370,11 @@ class TeslaCamViewer {
     }
     
     hideClipModal() {
+        // Cancel any pending export
+        if (this.videoClipProcessor) {
+            this.videoClipProcessor.cancelExport();
+        }
+        
         this.dom.clipModal.classList.remove('show');
         setTimeout(() => {
             this.dom.clipModal.style.display = 'none';
@@ -5968,10 +8489,11 @@ class TeslaCamViewer {
         }
         
         const addTimestamp = this.dom.addTimestamp.checked;
+        const addMetadata = document.getElementById('addMetadata').checked;
         const mergeGrid = this.dom.mergeVideos.checked && cameras.length > 1;
         const useLocalFFmpeg = this.isTauri && this.dom.useLocalFFmpeg && this.dom.useLocalFFmpeg.checked;
         
-        console.log('[startClipExport] Export options:', { addTimestamp, mergeGrid, useLocalFFmpeg, cameras });
+        console.log('[startClipExport] Export options:', { addTimestamp, addMetadata, mergeGrid, useLocalFFmpeg, cameras });
         
         // WEB ONLY: Ask for save location upfront to enable streaming
         let fileHandle = null;
@@ -5998,9 +8520,9 @@ class TeslaCamViewer {
              }
         }
 
-        // Disable button and show progress
+        // Disable start button but KEEP cancel button enabled
         this.dom.startClipBtn.disabled = true;
-        this.dom.cancelClipBtn.disabled = true;
+        if (this.dom.cancelClipBtn) this.dom.cancelClipBtn.disabled = false;
         this.dom.clipInfo.classList.add('disabled');
         this.dom.clipOptions.classList.add('disabled');
         this.dom.clipProgress.style.display = 'block';
@@ -6032,6 +8554,7 @@ class TeslaCamViewer {
                 this.videoControls.clipStartTime,
                 this.videoControls.clipEndTime,
                 addTimestamp,
+                addMetadata,
                 mergeGrid,
                 event.startTime,
                 (msg) => {
@@ -6057,7 +8580,8 @@ class TeslaCamViewer {
                 },
                 useLocalFFmpeg,
                 this.currentLanguage,
-                fileHandle
+                fileHandle,
+                this.metadataManager
             );
             
             this.dom.clipProgressBar.classList.remove('indeterminate');
@@ -6070,23 +8594,40 @@ class TeslaCamViewer {
                 for (const result of results) {
                     // Check if result is from FFmpeg (file path) or Canvas (blob)
                     if (result.isFile && result.path) {
-                        // FFmpeg export - file already saved, ask user where to move it
-                        const ext = result.path.endsWith('.mp4') ? 'mp4' : 'webm';
-                        const defaultFilename = result.path.substring(result.path.lastIndexOf('/') + 1).replace(/\\/g, '/').split('/').pop();
+                        const rawPath = result.path;
+                        const defaultFilename = rawPath.replace(/\\/g, '/').split('/').pop();
+                        const ext = defaultFilename.split('.').pop() || 'mp4';
+                        
+                        console.log('[Tauri Save] Finalizing export for:', defaultFilename, 'from temp:', rawPath);
                         
                         try {
-                            const invoke = window.__TAURI__.core?.invoke || window.__TAURI__.invoke;
-                            const fs = window.__TAURI__.fs;
+                            const tauri = window.__TAURI__;
+                            const invoke = tauri.core?.invoke || tauri.invoke;
+                            const fs = tauri.fs;
+                            const dialog = tauri.dialog;
                             
-                            const savePath = await invoke('plugin:dialog|save', {
-                                options: {
+                            let savePath;
+                            if (dialog && typeof dialog.save === 'function') {
+                                console.log('[Tauri Save] Using dialog.save API');
+                                savePath = await dialog.save({
                                     defaultPath: defaultFilename,
                                     filters: [{
                                         name: 'Video',
                                         extensions: [ext]
                                     }]
-                                }
-                            });
+                                });
+                            } else {
+                                console.log('[Tauri Save] Falling back to invoke plugin:dialog|save');
+                                savePath = await invoke('plugin:dialog|save', {
+                                    options: {
+                                        defaultPath: defaultFilename,
+                                        filters: [{
+                                            name: 'Video',
+                                            extensions: [ext]
+                                        }]
+                                    }
+                                });
+                            }
                             
                             const resolvedSavePath = typeof savePath === 'string' ? savePath : savePath?.path;
                             if (resolvedSavePath && resolvedSavePath !== result.path) {
@@ -6135,11 +8676,8 @@ class TeslaCamViewer {
                                 const arrayBuffer = await result.blob.arrayBuffer();
                                 const uint8Array = new Uint8Array(arrayBuffer);
                                 
-                                if (fs && fs.writeFile) {
-                                    await fs.writeFile(resolvedSavePath, uint8Array);
-                                } else                                 if (fs && fs.writeBinaryFile) {
-                                    await fs.writeBinaryFile(resolvedSavePath, uint8Array);
-                                }
+                                // Tauri v2 uses writeFile
+                                await fs.writeFile(resolvedSavePath, uint8Array);
                                 this.showToast('保存成功!', 'success');
                             }
                         } catch (e) {
@@ -6308,8 +8846,21 @@ class TeslaCamViewer {
     destroy() { if (this.multiCameraPlayer) this.multiCameraPlayer.cleanup(); }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+// Preload custom font for Canvas rendering
+async function preloadFonts() {
     try {
+        const font = new FontFace('Noto Sans SC', 'url(./assets/fonts/NotoSansSC-Light.ttf)');
+        await font.load();
+        document.fonts.add(font);
+        console.log('Font "Noto Sans SC" loaded successfully');
+    } catch (e) {
+        console.warn('Failed to load custom font, falling back to system fonts:', e);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        await preloadFonts();
         window.viewer = new TeslaCamViewer();
         window.addEventListener('beforeunload', () => { if (window.viewer) window.viewer.destroy(); });
         console.log('TeslaCam Player Initialized');
