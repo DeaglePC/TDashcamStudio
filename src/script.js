@@ -1,7 +1,7 @@
  const i18n = {
     en: {
-        pageTitle: "TeslaCam Player",
-        headerTitle: "TeslaCam Player",
+        pageTitle: "TDashcam Studio",
+        headerTitle: "TDashcam Studio",
         toggleSidebar: "Toggle Sidebar",
         toggleTheme: "Toggle Theme",
         toggleLanguage: "切换到中文",
@@ -95,8 +95,8 @@
         moreOptions: "More Options"
     },
     zh: {
-        pageTitle: "TeslaCam 播放器",
-        headerTitle: "TeslaCam 播放器",
+        pageTitle: "TDashcam Studio",
+        headerTitle: "TDashcam Studio",
         toggleSidebar: "切换侧边栏",
         toggleTheme: "切换主题",
         toggleLanguage: "Switch to English",
@@ -196,6 +196,25 @@
 // --- Tauri Helper Functions ---
 function getTauri() {
     return window.__TAURI__;
+}
+
+// Get system temp directory for temporary files
+async function getTempDir() {
+    const tauri = getTauri();
+    if (tauri && tauri.path && tauri.path.tempDir) {
+        try {
+            const tempDir = await tauri.path.tempDir();
+            // Ensure no trailing separator for consistency
+            return tempDir.replace(/[\/\\]$/, '');
+        } catch (e) {
+            console.warn('[getTempDir] Failed to get temp dir:', e);
+        }
+    }
+    // Fallback for different OS
+    if (typeof process !== 'undefined' && process.env) {
+        return process.env.TEMP || process.env.TMP || '/tmp';
+    }
+    return '/tmp';
 }
 
 function getFileUrl(file) {
@@ -4260,21 +4279,25 @@ class VideoClipProcessor {
         const fs = tauri.fs;
         const shell = tauri.shell;
         
-        // Use the directory of the first file
+        // Use the directory of the first file for output, temp dir for intermediate files
         const firstFile = clipSegments[0].segment.files[camera];
         if (!firstFile || !firstFile.path) throw new Error('File path not found');
         
         // Get directory path (handle both forward and back slashes)
         const pathSeparator = firstFile.path.includes('\\') ? '\\' : '/';
         const lastSepIdx = firstFile.path.lastIndexOf(pathSeparator);
-        let workDir = lastSepIdx !== -1 ? firstFile.path.substring(0, lastSepIdx) : '.';
+        const outputDir = lastSepIdx !== -1 ? firstFile.path.substring(0, lastSepIdx) : '.';
+        
+        // Use system temp directory for intermediate files
+        let workDir = await getTempDir();
+        const workSeparator = workDir.includes('\\') ? '\\' : '/';
         
         const timestamp = new Date().getTime();
         const listFilename = `ffmpeg_list_${camera}_${timestamp}.txt`;
         const outputFilename = `export_${camera}_${timestamp}.mp4`;
         
-        const listPath = `${workDir}${pathSeparator}${listFilename}`;
-        const outputPath = `${workDir}${pathSeparator}${outputFilename}`;
+        const listPath = `${workDir}${workSeparator}${listFilename}`;
+        const outputPath = `${outputDir}${pathSeparator}${outputFilename}`;
         
         // Generate list content
         let listContent = '';
@@ -4513,14 +4536,18 @@ class VideoClipProcessor {
         
         const pathSeparator = firstFile.path.includes('\\') ? '\\' : '/';
         const lastSepIdx = firstFile.path.lastIndexOf(pathSeparator);
-        let workDir = lastSepIdx !== -1 ? firstFile.path.substring(0, lastSepIdx) : '.';
+        const outputDir = lastSepIdx !== -1 ? firstFile.path.substring(0, lastSepIdx) : '.';
+        
+        // Use system temp directory for intermediate files
+        let workDir = await getTempDir();
+        const workSeparator = workDir.includes('\\') ? '\\' : '/';
         
         const timestamp = new Date().getTime();
         const listFilename = `ffmpeg_list_${camera}_${timestamp}.txt`;
         const outputFilename = `TeslaCam_${camera}_${timestamp}.mp4`;
         
-        const listPath = `${workDir}${pathSeparator}${listFilename}`;
-        const outputPath = `${workDir}${pathSeparator}${outputFilename}`;
+        const listPath = `${workDir}${workSeparator}${listFilename}`;
+        const outputPath = `${outputDir}${pathSeparator}${outputFilename}`;
         
         // Track temp files for cleanup
         const tempFiles = [listPath];
@@ -4798,11 +4825,15 @@ class VideoClipProcessor {
         
         const pathSeparator = firstFile.path.includes('\\') ? '\\' : '/';
         const lastSepIdx = firstFile.path.lastIndexOf(pathSeparator);
-        let workDir = lastSepIdx !== -1 ? firstFile.path.substring(0, lastSepIdx) : '.';
+        const outputDir = lastSepIdx !== -1 ? firstFile.path.substring(0, lastSepIdx) : '.';
+        
+        // Use system temp directory for intermediate files
+        let workDir = await getTempDir();
+        const workSeparator = workDir.includes('\\') ? '\\' : '/';
         
         const timestamp = new Date().getTime();
         const outputFilename = `TeslaCam_grid_${timestamp}.mp4`;
-        const outputPath = `${workDir}${pathSeparator}${outputFilename}`;
+        const outputPath = `${outputDir}${pathSeparator}${outputFilename}`;
         
         // Create temp concat files for each camera
         const tempFiles = [];
@@ -4813,7 +4844,7 @@ class VideoClipProcessor {
             const validCameras = [];
             for (const camera of activeCameras) {
                 const listFilename = `ffmpeg_list_${camera}_${timestamp}.txt`;
-                const listPath = `${workDir}${pathSeparator}${listFilename}`;
+                const listPath = `${workDir}${workSeparator}${listFilename}`;
                 tempFiles.push(listPath);
                 
                 let listContent = '';
@@ -8863,7 +8894,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await preloadFonts();
         window.viewer = new TeslaCamViewer();
         window.addEventListener('beforeunload', () => { if (window.viewer) window.viewer.destroy(); });
-        console.log('TeslaCam Player Initialized');
+        console.log('TDashcam Studio Initialized');
     } catch (error) {
         console.error("Initialization failed:", error);
         alert("Player initialization failed. Check console for details.");

@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="src/logo-small.png" alt="TeslaCam Player Logo" width="80" height="80">
+  <img src="src/logo-small.png" alt="TDashcam Studio Logo" width="80" height="80">
 </p>
-<h1 align="center">TeslaCam Player</h1>
+<h1 align="center">TDashcam Studio</h1>
 
 <p align="center">English | <a href="README_CN.md">简体中文</a></p>
 
@@ -13,13 +13,13 @@
   <a href="https://teslacam.dpc.cool"><img src="https://img.shields.io/badge/Website-teslacam.dpc.cool-blue?style=flat-square" alt="Website"></a>
 </p>
 
-A modern, browser-based viewer for your TeslaCam footage. Play all six camera angles (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar) simultaneously with a sleek and intuitive interface. Now available as a **desktop application**!
+A modern, browser-based viewer for your Tesla dashcam footage. Play all six camera angles (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar) simultaneously with a sleek and intuitive interface. Now available as a **desktop application**!
 
-## 🆚 Why choose TeslaCam Player?
+## 🆚 Why choose TDashcam Studio?
 
 Compared to the original Tesla Dashcam player, this project provides more powerful features and a superior experience:
 
-| Feature | Tesla In-Car Player | Raw PC Playback | TeslaCam Player (This Project) |
+| Feature | Tesla In-Car Player | Raw PC Playback | TDashcam Studio (This Project) |
 | :--- | :--- | :--- | :--- |
 | **Sync Playback** | ✅ Supports 6 channels | ❌ Manual file opening, no sync | ✅ **Perfect 6-channel sync, intuitive layout** |
 | **Viewing Exp.** | Limited to car screen | Large screen, but messy file folders | **Multi-device**, large screen, organized events |
@@ -95,7 +95,7 @@ Download the desktop application for your platform from the [Releases](https://g
 > **Note for macOS Users:**
 > If you encounter the "App is damaged and can't be opened" error, this is due to Apple's security quarantine. Please run the following command in Terminal to fix it:
 > ```bash
-> sudo xattr -rd com.apple.quarantine /Applications/TeslaCam\ Player.app
+> sudo xattr -rd com.apple.quarantine /Applications/TDashcam\ Studio.app
 > ```
 > *(Adjust the path if your app is not in the /Applications folder)*
 
@@ -174,8 +174,8 @@ The easiest way is to use Docker Compose with the pre-built image:
 
 2.  **Or build your own image:**
     ```bash
-    docker build -t teslacam-player .
-    docker run -d -p 8188:80 teslacam-player
+    docker build -t tdashcam-studio .
+    docker run -d -p 8188:80 tdashcam-studio
     ```
 
 3.  **Access the application:**

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "TeslaCam Player",
+  "productName": "TDashcam Studio",
   "version": "1.0.1",
-  "identifier": "com.teslacam.player",
+  "identifier": "com.tdashcam.studio",
   "build": {
     "frontendDist": "../src",
     "devUrl": "http://localhost:8188"
@@ -11,7 +11,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "TeslaCam Player",
+        "title": "TDashcam Studio",
         "width": 1400,
         "height": 900,
         "minWidth": 1024,

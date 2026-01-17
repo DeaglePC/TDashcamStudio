@@ -1,7 +1,7 @@
 {
-  "name": "teslacam-player",
+  "name": "tdashcam-studio",
   "version": "1.0.0",
-  "description": "Tesla Dashcam Video Player - Multi-camera synchronized playback",
+  "description": "TDashcam Studio - Multi-camera synchronized tesla dashcam playback",
   "private": true,
   "scripts": {
     "tauri": "npx tauri",
