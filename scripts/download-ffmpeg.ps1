@@ -1,4 +1,4 @@
-# FFmpeg Download Script for TeslaCam Player
+# FFmpeg Download Script for TDashcam Studio
 # Downloads FFmpeg binaries for Windows, macOS, and Linux
 
 $ErrorActionPreference = "Stop"
