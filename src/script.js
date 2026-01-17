@@ -8877,21 +8877,22 @@ class TeslaCamViewer {
     destroy() { if (this.multiCameraPlayer) this.multiCameraPlayer.cleanup(); }
 }
 
-// Preload custom font for Canvas rendering
-async function preloadFonts() {
-    try {
-        const font = new FontFace('Noto Sans SC', 'url(./assets/fonts/NotoSansSC-Light.ttf)');
-        await font.load();
-        document.fonts.add(font);
-        console.log('Font "Noto Sans SC" loaded successfully');
-    } catch (e) {
-        console.warn('Failed to load custom font, falling back to system fonts:', e);
+// Preload custom font for Canvas rendering (non-blocking)
+function preloadFonts() {
+    // Font is already defined in CSS with font-display: swap
+    // Just ensure it's ready for Canvas usage without blocking
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => {
+            console.log('Fonts ready for Canvas rendering');
+        }).catch(() => {
+            console.warn('Font loading check failed, using fallback');
+        });
     }
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
     try {
-        await preloadFonts();
+        preloadFonts();
         window.viewer = new TeslaCamViewer();
         window.addEventListener('beforeunload', () => { if (window.viewer) window.viewer.destroy(); });
         console.log('TDashcam Studio Initialized');

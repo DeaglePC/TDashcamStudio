@@ -10,7 +10,8 @@
   <a href="https://github.com/DeaglePC/TDashcamStudio/releases"><img src="https://img.shields.io/github/downloads/DeaglePC/TDashcamStudio/total?style=flat-square&color=green" alt="Downloads"></a>
   <a href="https://github.com/DeaglePC/TDashcamStudio/blob/main/LICENSE"><img src="https://img.shields.io/github/license/DeaglePC/TDashcamStudio?style=flat-square" alt="License"></a>
   <a href="https://github.com/DeaglePC/TDashcamStudio/stargazers"><img src="https://img.shields.io/github/stars/DeaglePC/TDashcamStudio?style=flat-square" alt="Stars"></a>
-  <a href="https://teslacam.dpc.cool"><img src="https://img.shields.io/badge/Website-teslacam.dpc.cool-blue?style=flat-square" alt="Website"></a>
+  <a href="https://github.com/DeaglePC/TDashcamStudio/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/DeaglePC/TDashcamStudio/build.yml?style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://tdashcam.studio/"><img src="https://img.shields.io/badge/Website-tdashcam.studio-blue?style=flat-square" alt="Website"></a>
 </p>
 
 A modern, browser-based viewer for your Tesla dashcam footage. Play all six camera angles (Front, Back, Left, Right, Left B-Pillar, Right B-Pillar) simultaneously with a sleek and intuitive interface. Now available as a **desktop application**!

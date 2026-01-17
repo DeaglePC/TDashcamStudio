@@ -1370,6 +1370,32 @@ body.dark-theme #eventFilter {
     .video-type {
         display: none !important;
     }
+
+    /* Help text adjustments for mobile */
+    .help-text {
+        padding: 15px;
+    }
+    
+    .help-text ol {
+        padding-left: 18px;
+    }
+    
+    .help-text li {
+        font-size: 0.95em;
+        line-height: 1.5;
+        margin-bottom: 8px;
+    }
+    
+    .help-text .note {
+        font-size: 0.85em;
+        padding-top: 12px;
+        margin-top: 12px;
+    }
+    
+    .help-text .desktop-tip {
+        font-size: 0.85em;
+        padding: 10px 12px;
+    }
 }
 
 body.sidebar-collapsed .open-sidebar-btn {
