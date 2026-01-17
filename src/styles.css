@@ -69,14 +69,7 @@ body.dark-theme {
     --calendar-picker-filter: invert(1);
 }
 
-/* Font Face Declaration */
-@font-face {
-    font-family: 'Noto Sans SC';
-    src: url('./assets/fonts/NotoSansSC-Light.ttf') format('truetype');
-    font-weight: 300;
-    font-style: normal;
-    font-display: swap;
-}
+/* Font Face Declaration - loaded dynamically in JS for desktop only */
 
 /* Global Reset & Body */
 * {

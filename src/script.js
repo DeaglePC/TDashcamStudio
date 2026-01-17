@@ -8877,10 +8877,24 @@ class TeslaCamViewer {
     destroy() { if (this.multiCameraPlayer) this.multiCameraPlayer.cleanup(); }
 }
 
-// Preload custom font for Canvas rendering (non-blocking)
+// Preload custom font for Canvas rendering (desktop only, non-blocking)
 function preloadFonts() {
-    // Font is already defined in CSS with font-display: swap
-    // Just ensure it's ready for Canvas usage without blocking
+    // Only load font in Tauri desktop environment
+    if (!window.__TAURI__) return;
+    
+    // Dynamically add @font-face for desktop
+    const style = document.createElement('style');
+    style.textContent = `
+        @font-face {
+            font-family: 'Noto Sans SC';
+            src: url('./assets/fonts/NotoSansSC-Light.ttf') format('truetype');
+            font-weight: 300;
+            font-style: normal;
+            font-display: swap;
+        }
+    `;
+    document.head.appendChild(style);
+    
     if (document.fonts && document.fonts.ready) {
         document.fonts.ready.then(() => {
             console.log('Fonts ready for Canvas rendering');
