@@ -6,10 +6,10 @@
 <p align="center">English | <a href="README_CN.md">简体中文</a></p>
 
 <p align="center">
-  <a href="https://github.com/DeaglePC/TeslaCamPlayer/releases"><img src="https://img.shields.io/github/v/release/DeaglePC/TeslaCamPlayer?style=flat-square&color=blue" alt="Release"></a>
-  <a href="https://github.com/DeaglePC/TeslaCamPlayer/releases"><img src="https://img.shields.io/github/downloads/DeaglePC/TeslaCamPlayer/total?style=flat-square&color=green" alt="Downloads"></a>
-  <a href="https://github.com/DeaglePC/TeslaCamPlayer/blob/main/LICENSE"><img src="https://img.shields.io/github/license/DeaglePC/TeslaCamPlayer?style=flat-square" alt="License"></a>
-  <a href="https://github.com/DeaglePC/TeslaCamPlayer/stargazers"><img src="https://img.shields.io/github/stars/DeaglePC/TeslaCamPlayer?style=flat-square" alt="Stars"></a>
+  <a href="https://github.com/DeaglePC/TDashcamStudio/releases"><img src="https://img.shields.io/github/v/release/DeaglePC/TDashcamStudio?style=flat-square&color=blue" alt="Release"></a>
+  <a href="https://github.com/DeaglePC/TDashcamStudio/releases"><img src="https://img.shields.io/github/downloads/DeaglePC/TDashcamStudio/total?style=flat-square&color=green" alt="Downloads"></a>
+  <a href="https://github.com/DeaglePC/TDashcamStudio/blob/main/LICENSE"><img src="https://img.shields.io/github/license/DeaglePC/TDashcamStudio?style=flat-square" alt="License"></a>
+  <a href="https://github.com/DeaglePC/TDashcamStudio/stargazers"><img src="https://img.shields.io/github/stars/DeaglePC/TDashcamStudio?style=flat-square" alt="Stars"></a>
   <a href="https://teslacam.dpc.cool"><img src="https://img.shields.io/badge/Website-teslacam.dpc.cool-blue?style=flat-square" alt="Website"></a>
 </p>
 
@@ -83,7 +83,7 @@ Compared to the original Tesla Dashcam player, this project provides more powerf
 
 ### 🖥️ Desktop Application (Recommended)
 
-Download the desktop application for your platform from the [Releases](https://github.com/DeaglePC/TeslaCamPlayer/releases) page:
+Download the desktop application for your platform from the [Releases](https://github.com/DeaglePC/TDashcamStudio/releases) page:
 
 | Platform | Download |
 |----------|----------|
