@@ -886,8 +886,25 @@ body.dark-theme #eventFilter {
     gap: 8px;
 }
 
+/* Speed Graph above progress bar */
+.speed-graph-container {
+    width: 100%;
+    height: 32px;
+    position: relative;
+    margin-bottom: -12px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
 
+.speed-graph-container.visible {
+    opacity: 1;
+}
 
+.speed-graph-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
 
 .progress-container {
     width: 100%;

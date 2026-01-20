@@ -2793,6 +2793,10 @@ class ModernVideoControls {
         this.speedBtn = this.container.querySelector('#speedBtn');
         this.speedOptions = this.container.querySelector('.speed-options');
         
+        // Speed graph elements
+        this.speedGraphContainer = this.container.querySelector('#speedGraphContainer');
+        this.speedGraphCanvas = this.container.querySelector('#speedGraphCanvas');
+        
         // Clip elements
         this.clipBtn = this.container.querySelector('#clipBtn');
         this.confirmClipBtn = this.container.querySelector('#confirmClipBtn');
@@ -2910,6 +2914,17 @@ class ModernVideoControls {
             if (this.speedControl && this.speedControl.classList.contains('active') && !this.speedControl.contains(e.target)) {
                 this.speedControl.classList.remove('active');
             }
+        });
+        
+        // Handle resize for speed graph redraw
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                if (this.lastSpeedGraphData) {
+                    this.drawSpeedGraph(this.lastSpeedGraphData.metadata, this.lastSpeedGraphData.durations);
+                }
+            }, 100);
         });
     }
     
@@ -3317,6 +3332,126 @@ class ModernVideoControls {
         } catch (e) {
             console.error("Error creating event marker:", e);
         }
+    }
+    
+    /**
+     * Draw speed graph based on metadata for the entire event
+     * @param {Array} allSegmentsMetadata - Array of metadata arrays for each segment
+     * @param {Array} segmentDurations - Duration of each segment
+     */
+    drawSpeedGraph(allSegmentsMetadata, segmentDurations) {
+        if (!this.speedGraphCanvas || !this.speedGraphContainer) return;
+        
+        // Store data for resize redraw
+        this.lastSpeedGraphData = { metadata: allSegmentsMetadata, durations: segmentDurations };
+        
+        if (!allSegmentsMetadata || allSegmentsMetadata.length === 0) {
+            this.speedGraphContainer.classList.remove('visible');
+            return;
+        }
+        
+        const canvas = this.speedGraphCanvas;
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size for high DPI
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        
+        const width = rect.width;
+        const height = rect.height;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, width, height);
+        
+        // Collect all speed data with normalized time
+        const speedData = [];
+        let totalDuration = 0;
+        
+        for (let i = 0; i < allSegmentsMetadata.length; i++) {
+            const segmentMeta = allSegmentsMetadata[i];
+            const segmentDuration = segmentDurations[i] || 60;
+            const segmentStartTime = totalDuration;
+            
+            if (segmentMeta && segmentMeta.length > 0) {
+                for (const item of segmentMeta) {
+                    const speedKmh = (item.data?.vehicleSpeedMps || 0) * 3.6;
+                    const timeInEvent = segmentStartTime + (item.time || 0);
+                    speedData.push({ time: timeInEvent, speed: speedKmh });
+                }
+            }
+            totalDuration += segmentDuration;
+        }
+        
+        if (speedData.length < 2 || totalDuration === 0) {
+            this.speedGraphContainer.classList.remove('visible');
+            return;
+        }
+        
+        // Sort by time
+        speedData.sort((a, b) => a.time - b.time);
+        
+        // Find max speed for scaling
+        const maxSpeed = Math.max(...speedData.map(d => d.speed), 1);
+        const padding = { top: 2, bottom: 4 };
+        const graphHeight = height - padding.top - padding.bottom;
+        
+        // Create gradient fill
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, 'rgba(66, 165, 245, 0.5)');
+        gradient.addColorStop(1, 'rgba(66, 165, 245, 0.05)');
+        
+        // Draw filled area
+        ctx.beginPath();
+        ctx.moveTo(0, height);
+        
+        for (let i = 0; i < speedData.length; i++) {
+            const x = (speedData[i].time / totalDuration) * width;
+            const y = height - padding.bottom - (speedData[i].speed / maxSpeed) * graphHeight;
+            
+            if (i === 0) {
+                ctx.lineTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        // Close the path
+        const lastX = (speedData[speedData.length - 1].time / totalDuration) * width;
+        ctx.lineTo(lastX, height);
+        ctx.closePath();
+        
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        
+        // Draw the line on top
+        ctx.beginPath();
+        for (let i = 0; i < speedData.length; i++) {
+            const x = (speedData[i].time / totalDuration) * width;
+            const y = height - padding.bottom - (speedData[i].speed / maxSpeed) * graphHeight;
+            
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        ctx.strokeStyle = 'rgba(66, 165, 245, 0.8)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        this.speedGraphContainer.classList.add('visible');
+    }
+    
+    clearSpeedGraph() {
+        if (!this.speedGraphCanvas || !this.speedGraphContainer) return;
+        const ctx = this.speedGraphCanvas.getContext('2d');
+        ctx.clearRect(0, 0, this.speedGraphCanvas.width, this.speedGraphCanvas.height);
+        this.speedGraphContainer.classList.remove('visible');
+        this.lastSpeedGraphData = null;
     }
 }
 
@@ -7739,6 +7874,9 @@ class TeslaCamViewer {
         this.videoControls.setTotalDuration(this.continuousPlayer.getTotalDuration());
         this.videoControls.addEventMarkers(event);
         
+        // Load speed graph for entire event (async, don't block playback)
+        this.loadSpeedGraphForEvent(event);
+        
         // Default to Legacy (PIP) view with Front camera
         this.multiCameraPlayer.setCamera('front');
         this.multiCameraPlayer.setLayout('legacy');
@@ -7749,6 +7887,74 @@ class TeslaCamViewer {
         document.querySelectorAll('.video-card.active').forEach(c => c.classList.remove('active'));
         document.querySelector(`.video-card[data-event-id="${eventId}"]`)?.classList.add('active');
         if (window.innerWidth < 768) this.toggleSidebar(false);
+    }
+    
+    /**
+     * Load speed data for all segments and draw the speed graph
+     */
+    async loadSpeedGraphForEvent(event) {
+        if (!event || !event.segments || event.segments.length === 0) {
+            this.videoControls.clearSpeedGraph();
+            return;
+        }
+        
+        try {
+            const allSegmentsMetadata = [];
+            const segmentDurations = event.segmentDurations || [];
+            
+            for (let i = 0; i < event.segments.length; i++) {
+                const segment = event.segments[i];
+                const file = segment.files?.front;
+                
+                if (!file) {
+                    allSegmentsMetadata.push([]);
+                    continue;
+                }
+                
+                try {
+                    let buffer;
+                    if (file instanceof File) {
+                        buffer = await file.arrayBuffer();
+                    } else if (file instanceof TauriFile) {
+                        buffer = await file.arrayBuffer();
+                    } else if (file && file.path) {
+                        const response = await fetch(getFileUrl(file));
+                        buffer = await response.arrayBuffer();
+                    } else {
+                        allSegmentsMetadata.push([]);
+                        continue;
+                    }
+                    
+                    const parser = new DashcamMP4(buffer);
+                    const rawMetadata = parser.parseMetadata();
+                    
+                    if (this.metadataManager && this.metadataManager.SeiMetadata) {
+                        const segmentMeta = rawMetadata.map(item => {
+                            try {
+                                const decoded = this.metadataManager.SeiMetadata.decode(item.data);
+                                return {
+                                    time: item.time,
+                                    data: this.metadataManager.SeiMetadata.toObject(decoded, { enums: String, longs: String })
+                                };
+                            } catch {
+                                return null;
+                            }
+                        }).filter(Boolean);
+                        allSegmentsMetadata.push(segmentMeta);
+                    } else {
+                        allSegmentsMetadata.push([]);
+                    }
+                } catch (err) {
+                    console.warn(`[SpeedGraph] Failed to load metadata for segment ${i}:`, err);
+                    allSegmentsMetadata.push([]);
+                }
+            }
+            
+            this.videoControls.drawSpeedGraph(allSegmentsMetadata, segmentDurations);
+        } catch (err) {
+            console.error('[SpeedGraph] Error loading speed graph:', err);
+            this.videoControls.clearSpeedGraph();
+        }
     }
 
     switchCamera(viewId) {
