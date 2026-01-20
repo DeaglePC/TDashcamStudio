@@ -92,7 +92,17 @@
         autopilotSelfDriving: "FSD",
         autopilotAutosteer: "Autosteer",
         autopilotTACC: "TACC",
-        moreOptions: "More Options"
+        moreOptions: "More Options",
+        metadataDetail: "Details",
+        vehicleStatus: "Vehicle Status",
+        drivingAssist: "Driving Assist",
+        locationInfo: "Location Info",
+        motionData: "Motion Data",
+        latitude: "Latitude",
+        longitude: "Longitude",
+        accelX: "Accel X",
+        accelY: "Accel Y",
+        accelZ: "Accel Z"
     },
     zh: {
         pageTitle: "TDashcam Studio",
@@ -189,7 +199,17 @@
         autopilotSelfDriving: "完全自动驾驶 (FSD)",
         autopilotAutosteer: "自动辅助转向",
         autopilotTACC: "自适应巡航",
-        moreOptions: "更多选项"
+        moreOptions: "更多选项",
+        metadataDetail: "详细数据",
+        vehicleStatus: "车辆状态",
+        drivingAssist: "驾驶辅助",
+        locationInfo: "位置信息",
+        motionData: "运动数据",
+        latitude: "纬度",
+        longitude: "经度",
+        accelX: "加速度 X",
+        accelY: "加速度 Y",
+        accelZ: "加速度 Z"
     }
 };
 
@@ -1495,10 +1515,16 @@ class MetadataManager {
         this.SeiMetadata = null;
         this.currentMetadata = []; // Array of metadata objects for the current segment
         this.isLoading = false;
+        this.detailModalOpen = false;
+        this.lastDetailData = null;
         
         this.dom = {
             panel: document.getElementById('metadataPanel'),
             switchBtn: document.getElementById('metaSwitchBtn'),
+            detailBtn: document.getElementById('metaDetailBtn'),
+            statsOverlay: document.getElementById('metaDetailOverlay'),
+            closeStatsBtn: document.getElementById('closeStatsBtn'),
+            statsTitle: document.getElementById('statsTitle'),
             loading: document.getElementById('metadataLoading'),
             empty: document.getElementById('metadataEmpty'),
             items: document.getElementById('metadataItems'),
@@ -1519,6 +1545,18 @@ class MetadataManager {
                 gps: document.getElementById('metaGPS'),
                 heading: document.getElementById('metaHeading'),
                 acceleration: document.getElementById('metaAcceleration')
+            },
+            stats: {
+                speed: document.getElementById('statsSpeed'),
+                gear: document.getElementById('statsGear'),
+                steering: document.getElementById('statsSteering'),
+                accelerator: document.getElementById('statsAccelerator'),
+                brake: document.getElementById('statsBrake'),
+                blinker: document.getElementById('statsBlinker'),
+                autopilot: document.getElementById('statsAutopilot'),
+                gps: document.getElementById('statsGPS'),
+                heading: document.getElementById('statsHeading'),
+                accel: document.getElementById('statsAccel')
             }
         };
         
@@ -1549,6 +1587,23 @@ class MetadataManager {
                 this.setCollapsed(!isCollapsed);
             });
         }
+
+        // Stats overlay button click (toggle)
+        if (this.dom.detailBtn) {
+            this.dom.detailBtn.addEventListener('click', () => {
+                this.toggleStatsOverlay();
+            });
+        }
+
+        // Close stats overlay
+        if (this.dom.closeStatsBtn) {
+            this.dom.closeStatsBtn.addEventListener('click', () => {
+                this.hideStatsOverlay();
+            });
+        }
+
+        // Stats overlay draggable logic
+        this.initStatsOverlayDrag();
 
         // Draggable logic
         let isDragging = false;
@@ -1806,10 +1861,217 @@ class MetadataManager {
                                      typeof d.linearAccelerationMps2Z === 'number') 
             ? `X:${d.linearAccelerationMps2X.toFixed(2)} Y:${d.linearAccelerationMps2Y.toFixed(2)} Z:${d.linearAccelerationMps2Z.toFixed(2)}` 
             : '--';
+
+        // Store for detail modal
+        this.lastDetailData = d;
+        
+        // Update stats overlay if open
+        if (this.detailModalOpen) {
+            this.updateStatsDisplay(d);
+        }
+    }
+    
+    toggleStatsOverlay() {
+        if (this.detailModalOpen) {
+            this.hideStatsOverlay();
+        } else {
+            this.showStatsOverlay();
+        }
+    }
+    
+    showStatsOverlay() {
+        if (!this.dom.statsOverlay) return;
+        this.dom.statsOverlay.classList.add('show');
+        this.detailModalOpen = true;
+        
+        // Update title based on language
+        const lang = this.viewer.currentLanguage;
+        if (this.dom.statsTitle) {
+            this.dom.statsTitle.textContent = lang === 'zh' ? '行车数据' : 'Drive Stats';
+        }
+        
+        // Update with latest data
+        if (this.lastDetailData) {
+            this.updateStatsDisplay(this.lastDetailData);
+        }
+    }
+    
+    hideStatsOverlay() {
+        if (!this.dom.statsOverlay) return;
+        this.dom.statsOverlay.classList.remove('show');
+        this.detailModalOpen = false;
+    }
+    
+    initStatsOverlayDrag() {
+        if (!this.dom.statsOverlay) return;
+        
+        let isDragging = false;
+        let offsetX, offsetY;
+        
+        const onMouseDown = (e) => {
+            if (e.button !== 0) return;
+            
+            isDragging = true;
+            this.dom.statsOverlay.classList.add('dragging');
+            
+            const rect = this.dom.statsOverlay.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+            
+            e.preventDefault();
+        };
+        
+        const onMouseMove = (e) => {
+            if (!isDragging) return;
+            
+            let newLeft = e.clientX - offsetX;
+            let newTop = e.clientY - offsetY;
+            
+            // Boundary checks
+            const panelRect = this.dom.statsOverlay.getBoundingClientRect();
+            newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - panelRect.width));
+            newTop = Math.max(0, Math.min(newTop, window.innerHeight - panelRect.height));
+            
+            this.dom.statsOverlay.style.left = `${newLeft}px`;
+            this.dom.statsOverlay.style.top = `${newTop}px`;
+            this.dom.statsOverlay.classList.add('is-moved');
+        };
+        
+        const onMouseUp = () => {
+            isDragging = false;
+            this.dom.statsOverlay.classList.remove('dragging');
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        };
+        
+        // Touch support for mobile
+        const onTouchStart = (e) => {
+            if (e.touches.length !== 1) return;
+            
+            isDragging = true;
+            this.dom.statsOverlay.classList.add('dragging');
+            
+            const touch = e.touches[0];
+            const rect = this.dom.statsOverlay.getBoundingClientRect();
+            offsetX = touch.clientX - rect.left;
+            offsetY = touch.clientY - rect.top;
+            
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('touchend', onTouchEnd);
+        };
+        
+        const onTouchMove = (e) => {
+            if (!isDragging || e.touches.length !== 1) return;
+            e.preventDefault();
+            
+            const touch = e.touches[0];
+            let newLeft = touch.clientX - offsetX;
+            let newTop = touch.clientY - offsetY;
+            
+            const panelRect = this.dom.statsOverlay.getBoundingClientRect();
+            newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - panelRect.width));
+            newTop = Math.max(0, Math.min(newTop, window.innerHeight - panelRect.height));
+            
+            this.dom.statsOverlay.style.left = `${newLeft}px`;
+            this.dom.statsOverlay.style.top = `${newTop}px`;
+            this.dom.statsOverlay.classList.add('is-moved');
+        };
+        
+        const onTouchEnd = () => {
+            isDragging = false;
+            this.dom.statsOverlay.classList.remove('dragging');
+            document.removeEventListener('touchmove', onTouchMove);
+            document.removeEventListener('touchend', onTouchEnd);
+        };
+        
+        this.dom.statsOverlay.addEventListener('mousedown', onMouseDown);
+        this.dom.statsOverlay.addEventListener('touchstart', onTouchStart, { passive: true });
+    }
+    
+    updateStatsDisplay(d) {
+        const lang = this.viewer.currentLanguage;
+        const s = this.dom.stats;
+        if (!s.speed) return;
+        
+        // Speed
+        const speedKmh = (d.vehicleSpeedMps || 0) * 3.6;
+        s.speed.textContent = `${speedKmh.toFixed(1)} km/h`;
+        
+        // Gear
+        const gearMap = {
+            'GEAR_PARK': 'P',
+            'GEAR_DRIVE': 'D',
+            'GEAR_REVERSE': 'R',
+            'GEAR_NEUTRAL': 'N'
+        };
+        s.gear.textContent = gearMap[d.gearState] || '--';
+        
+        // Steering
+        const steeringAngle = d.steeringWheelAngle || 0;
+        s.steering.textContent = `${steeringAngle.toFixed(1)}°`;
+        
+        // Accelerator
+        const accelPercent = d.acceleratorPedalPosition || 0;
+        s.accelerator.textContent = `${accelPercent.toFixed(1)}%`;
+        
+        // Brake
+        s.brake.textContent = d.brakeApplied 
+            ? (lang === 'zh' ? '踩下' : 'Applied') 
+            : (lang === 'zh' ? '未踩' : 'Released');
+        s.brake.className = 'stats-value' + (d.brakeApplied ? ' highlight-red' : '');
+        
+        // Blinker
+        const blinkerLeft = d.blinkerOnLeft || false;
+        const blinkerRight = d.blinkerOnRight || false;
+        if (blinkerLeft && blinkerRight) {
+            s.blinker.textContent = lang === 'zh' ? '双闪' : 'Hazard';
+            s.blinker.className = 'stats-value highlight-yellow';
+        } else if (blinkerLeft) {
+            s.blinker.textContent = lang === 'zh' ? '← 左转' : '← Left';
+            s.blinker.className = 'stats-value highlight-green';
+        } else if (blinkerRight) {
+            s.blinker.textContent = lang === 'zh' ? '右转 →' : 'Right →';
+            s.blinker.className = 'stats-value highlight-green';
+        } else {
+            s.blinker.textContent = lang === 'zh' ? '关' : 'Off';
+            s.blinker.className = 'stats-value';
+        }
+        
+        // Autopilot
+        const apMap = {
+            'NONE': lang === 'zh' ? '无' : 'None',
+            'SELF_DRIVING': 'FSD',
+            'AUTOSTEER': lang === 'zh' ? '自动转向' : 'Autosteer',
+            'TACC': 'TACC'
+        };
+        s.autopilot.textContent = apMap[d.autopilotState] || d.autopilotState || '--';
+        s.autopilot.className = 'stats-value' + (d.autopilotState && d.autopilotState !== 'NONE' ? ' highlight-blue' : '');
+        
+        // GPS
+        if (typeof d.latitudeDeg === 'number' && typeof d.longitudeDeg === 'number') {
+            s.gps.textContent = `${d.latitudeDeg.toFixed(6)}, ${d.longitudeDeg.toFixed(6)}`;
+        } else {
+            s.gps.textContent = '--';
+        }
+        
+        // Heading
+        s.heading.textContent = typeof d.headingDeg === 'number' ? `${d.headingDeg.toFixed(1)}°` : '--';
+        
+        // Acceleration (combined)
+        if (typeof d.linearAccelerationMps2X === 'number') {
+            s.accel.textContent = `X:${d.linearAccelerationMps2X.toFixed(2)} Y:${d.linearAccelerationMps2Y.toFixed(2)} Z:${d.linearAccelerationMps2Z.toFixed(2)}`;
+        } else {
+            s.accel.textContent = '--';
+        }
     }
     
     clear() {
         this.currentMetadata = [];
+        this.lastDetailData = null;
+        this.hideStatsOverlay();
         this.updateUIStatus();
     }
 }
@@ -2945,6 +3207,12 @@ class ModernVideoControls {
         const metadataBtn = this.viewer.dom.metadataSwitchBtn;
         if (metadataBtn) {
             metadataBtn.disabled = !this.viewer.currentEvent;
+        }
+        
+        // Enable/disable metadata detail button
+        const metadataDetailBtn = document.getElementById('metaDetailBtn');
+        if (metadataDetailBtn) {
+            metadataDetailBtn.disabled = !this.viewer.currentEvent;
         }
         
         // Enable/disable clip button
