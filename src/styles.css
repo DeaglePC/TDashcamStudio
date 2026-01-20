@@ -165,85 +165,91 @@ body {
     display: none;
 }
 
-@media (max-width: 600px) {
-    .header-menu-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
+/* Dynamic header collapse - triggered by JS when buttons overlap center info */
+.header-collapsed .header-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
 
-    .header-actions-group {
-        position: absolute;
-        top: calc(100% + 10px);
-        right: 8px;
-        background-color: var(--bg-secondary);
-        border: 1px solid var(--border-primary);
-        border-radius: 12px;
-        padding: 4px;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-        opacity: 0;
-        visibility: hidden;
-        transform: translateY(-8px) scale(0.98);
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        z-index: 1000;
-        min-width: 170px;
-    }
+.header-collapsed .header-actions-group {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 8px;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: 12px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-8px) scale(0.98);
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 0s linear 0.2s;
+    z-index: 1000;
+    min-width: 170px;
+}
 
-    .header-right.active .header-actions-group {
-        opacity: 1;
-        visibility: visible;
-        transform: translateY(0) scale(1);
-    }
+.header-collapsed .header-right.active .header-actions-group {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                visibility 0s linear 0s;
+}
 
-    .header-actions-group button,
-    .header-actions-group a {
-        width: 100% !important;
-        height: 38px !important; /* 更精致的高度 */
-        border-radius: 8px !important;
-        display: flex !important;
-        flex-direction: row !important;
-        align-items: center !important;
-        justify-content: flex-start !important;
-        padding: 0 10px !important;
-        background-color: transparent !important;
-        gap: 12px !important;
-        color: var(--text-primary) !important;
-        text-decoration: none !important;
-        border: none !important;
-        cursor: pointer !important;
-        font-size: 0.85rem !important; /* 稍微缩小字号 */
-        font-weight: normal !important; /* 统一样式，取消加粗 */
-        margin: 0 !important;
-        box-shadow: none !important;
-        min-width: 0 !important;
-        max-width: none !important;
-    }
+.header-collapsed .header-actions-group button,
+.header-collapsed .header-actions-group a {
+    width: 100% !important;
+    height: 38px !important;
+    border-radius: 8px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    padding: 0 10px !important;
+    background-color: transparent !important;
+    gap: 12px !important;
+    color: var(--text-primary) !important;
+    text-decoration: none !important;
+    border: none !important;
+    cursor: pointer !important;
+    font-size: 0.85rem !important;
+    font-weight: normal !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    min-width: 0 !important;
+    max-width: none !important;
+}
 
-    .header-actions-group button:hover,
-    .header-actions-group a:hover {
-        background-color: var(--bg-tertiary) !important;
-    }
+.header-collapsed .header-actions-group button:hover,
+.header-collapsed .header-actions-group a:hover {
+    background-color: var(--bg-tertiary) !important;
+}
 
-    .header-actions-group .btn-icon {
-        font-size: 1.1rem;
-        width: 24px !important;
-        height: 24px !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        flex-shrink: 0 !important;
-        margin: 0 !important;
-    }
+.header-collapsed .header-actions-group .btn-icon {
+    font-size: 1.1rem;
+    width: 24px !important;
+    height: 24px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+}
 
-    .header-actions-group .btn-text {
-        display: block !important;
-        white-space: nowrap !important;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
+.header-collapsed .header-actions-group .btn-text {
+    display: block !important;
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .main-header .theme-toggle-btn {
@@ -2081,9 +2087,9 @@ body.sidebar-collapsed .open-sidebar-btn {
 /* YouTube-style Stats Overlay */
 .stats-overlay {
     position: fixed;
-    top: 80px;
-    left: 50%;
-    transform: translateX(-50%);
+    top: 70px;
+    left: 16px;
+    transform: none;
     background: rgba(32, 32, 32, 0.92);
     color: #ccc;
     font-family: 'Roboto Mono', 'Consolas', 'Monaco', monospace;
@@ -2111,10 +2117,6 @@ body.sidebar-collapsed .open-sidebar-btn {
     cursor: grabbing;
     background: rgba(40, 40, 40, 0.9);
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
-}
-
-.stats-overlay.is-moved {
-    transform: none;
 }
 
 .stats-header {
@@ -2198,15 +2200,10 @@ body.sidebar-collapsed .open-sidebar-btn {
         top: 60px;
         left: 10px;
         right: 10px;
-        transform: none;
         min-width: auto;
         max-width: none;
         font-size: 11px;
         border-radius: 10px;
-    }
-    
-    .stats-overlay.is-moved {
-        right: auto;
     }
 }
 

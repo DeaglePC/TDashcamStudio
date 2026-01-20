@@ -1943,7 +1943,6 @@ class MetadataManager {
             
             this.dom.statsOverlay.style.left = `${newLeft}px`;
             this.dom.statsOverlay.style.top = `${newTop}px`;
-            this.dom.statsOverlay.classList.add('is-moved');
         };
         
         const onMouseUp = () => {
@@ -1983,7 +1982,6 @@ class MetadataManager {
             
             this.dom.statsOverlay.style.left = `${newLeft}px`;
             this.dom.statsOverlay.style.top = `${newTop}px`;
-            this.dom.statsOverlay.classList.add('is-moved');
         };
         
         const onTouchEnd = () => {
@@ -7202,6 +7200,9 @@ class TeslaCamViewer {
             headerLocationDisplay: document.getElementById('headerLocationDisplay'),
             headerMenuBtn: document.getElementById('headerMenuBtn'),
             headerRight: document.getElementById('headerRight'),
+            headerActionsGroup: document.getElementById('headerActionsGroup'),
+            headerCenterInfo: document.getElementById('headerCenterInfo') || document.querySelector('.header-center-info'),
+            mainHeader: document.querySelector('.main-header'),
             // Clip modal elements
             clipModal: document.getElementById('clipModal'),
             clipModalTitle: document.getElementById('clipModalTitle'),
@@ -7428,6 +7429,11 @@ class TeslaCamViewer {
                 this.hideFilePathModal();
             }
         });
+
+        // Initial check for header collapse after DOM is ready
+        requestAnimationFrame(() => {
+            this.checkHeaderCollapse();
+        });
     }
 
     /**
@@ -7511,6 +7517,7 @@ class TeslaCamViewer {
         const activeElement = document.activeElement;
         const isTyping = activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA' || activeElement.isContentEditable);
 
+
         if (e.key === ' ' && !isTyping) {
             e.preventDefault();
             this.videoControls.togglePlayPause();
@@ -7526,6 +7533,58 @@ class TeslaCamViewer {
         setTimeout(() => {
             this.dom.sidebar.style.transition = '';
         }, 50);
+
+        // Check if header buttons need to collapse
+        this.checkHeaderCollapse();
+    }
+
+    checkHeaderCollapse() {
+        const mainHeader = this.dom.mainHeader;
+        const centerInfo = this.dom.headerCenterInfo;
+        const actionsGroup = this.dom.headerActionsGroup;
+        const headerRight = this.dom.headerRight;
+        
+        if (!mainHeader || !centerInfo || !actionsGroup) return;
+
+        // Store current state
+        const wasCollapsed = mainHeader.classList.contains('header-collapsed');
+        
+        // Close dropdown menu during resize to prevent visual glitches
+        if (headerRight) {
+            headerRight.classList.remove('active');
+        }
+        
+        // Disable transitions and hide actionsGroup during measurement
+        mainHeader.style.transition = 'none';
+        actionsGroup.style.transition = 'none';
+        actionsGroup.style.visibility = 'hidden';
+        actionsGroup.style.opacity = '0';
+        
+        // Temporarily force non-collapsed state to measure true button width
+        mainHeader.classList.remove('header-collapsed');
+        
+        // Force a reflow to get accurate measurements
+        void mainHeader.offsetWidth;
+        
+        // Get bounding rects
+        const centerRect = centerInfo.getBoundingClientRect();
+        const actionsRect = actionsGroup.getBoundingClientRect();
+        
+        // Check if there's overlap (with some padding for safety)
+        const padding = 16;
+        const shouldCollapse = actionsRect.left < (centerRect.right + padding);
+
+        if (shouldCollapse) {
+            mainHeader.classList.add('header-collapsed');
+        }
+        
+        // Restore styles after a frame
+        requestAnimationFrame(() => {
+            mainHeader.style.transition = '';
+            actionsGroup.style.transition = '';
+            actionsGroup.style.visibility = '';
+            actionsGroup.style.opacity = '';
+        });
     }
 
     async handleDrop(e) {
@@ -8776,6 +8835,9 @@ class TeslaCamViewer {
         document.body.classList.toggle('sidebar-collapsed', isNowCollapsed);
         this.dom.toggleSidebarBtn.classList.toggle('collapsed', isNowCollapsed);
         this.dom.overlay.classList.toggle('active', !isNowCollapsed && window.innerWidth < 768);
+        
+        // Re-check header collapse after sidebar animation completes
+        setTimeout(() => this.checkHeaderCollapse(), 350);
     }
 
     initSwipeGestures() {
