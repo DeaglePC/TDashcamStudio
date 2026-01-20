@@ -102,7 +102,10 @@
         longitude: "Longitude",
         accelX: "Accel X",
         accelY: "Accel Y",
-        accelZ: "Accel Z"
+        accelZ: "Accel Z",
+        exportMetadata: "Export CSV",
+        exportMetadataSuccess: "Metadata exported successfully",
+        exportMetadataNoData: "No metadata available to export"
     },
     zh: {
         pageTitle: "TDashcam Studio",
@@ -209,7 +212,10 @@
         longitude: "经度",
         accelX: "加速度 X",
         accelY: "加速度 Y",
-        accelZ: "加速度 Z"
+        accelZ: "加速度 Z",
+        exportMetadata: "导出CSV",
+        exportMetadataSuccess: "元数据导出成功",
+        exportMetadataNoData: "没有可导出的元数据"
     }
 };
 
@@ -3228,6 +3234,12 @@ class ModernVideoControls {
         const metadataDetailBtn = document.getElementById('metaDetailBtn');
         if (metadataDetailBtn) {
             metadataDetailBtn.disabled = !this.viewer.currentEvent;
+        }
+        
+        // Enable/disable export metadata button
+        const exportMetadataBtn = document.getElementById('exportMetadataBtn');
+        if (exportMetadataBtn) {
+            exportMetadataBtn.disabled = !this.viewer.currentEvent;
         }
         
         // Enable/disable clip button
@@ -7185,6 +7197,7 @@ class TeslaCamViewer {
             closeModalBtn: document.getElementById('closeModalBtn'),
             revealFileBtn: document.getElementById('revealFileBtn'),
             downloadFileBtn: document.getElementById('downloadFileBtn'),
+            exportMetadataBtn: document.getElementById('exportMetadataBtn'),
             metadataSwitchBtn: document.getElementById('metaSwitchBtn'),
             headerLocationDisplay: document.getElementById('headerLocationDisplay'),
             headerMenuBtn: document.getElementById('headerMenuBtn'),
@@ -7395,6 +7408,7 @@ class TeslaCamViewer {
         this.dom.googleMapBtn.addEventListener('click', () => this.openMap('google'));
         this.dom.revealFileBtn.addEventListener('click', () => this.revealCurrentFilePath());
         this.dom.downloadFileBtn.addEventListener('click', () => this.downloadCurrentFile());
+        this.dom.exportMetadataBtn.addEventListener('click', () => this.exportMetadataToCSV());
         
         // Clip modal listeners
         this.dom.closeClipModalBtn.addEventListener('click', () => this.hideClipModal());
@@ -7956,6 +7970,279 @@ class TeslaCamViewer {
             this.videoControls.clearSpeedGraph();
         }
     }
+    
+    /**
+     * Export all metadata from the current event to a CSV file
+     */
+    async exportMetadataToCSV() {
+        const lang = this.currentLanguage;
+        const translations = i18n[lang];
+        
+        if (!this.currentEvent || !this.currentEvent.segments) {
+            alert(translations.exportMetadataNoData);
+            return;
+        }
+        
+        try {
+            const allMetadata = [];
+            const segmentDurations = this.currentEvent.segmentDurations || [];
+            let accumulatedTime = 0;
+            
+            // Parse event start time for timestamp calculation
+            let eventStartDate = null;
+            
+            // Helper function to parse timestamp
+            const parseTimestampStr = (timestamp) => {
+                if (!timestamp) return null;
+                try {
+                    // Parse "2024-01-01_12-00-00" or "2024-01-01_12-00" format
+                    const [datePart, timePart] = timestamp.split('_');
+                    if (datePart && timePart) {
+                        // Handle both HH-MM-SS and HH-MM formats
+                        const timeComponents = timePart.split('-');
+                        let timeStr;
+                        if (timeComponents.length >= 3) {
+                            // Has seconds: HH-MM-SS
+                            timeStr = `${timeComponents[0]}:${timeComponents[1]}:${timeComponents[2]}`;
+                        } else if (timeComponents.length === 2) {
+                            // No seconds: HH-MM, add :00
+                            timeStr = `${timeComponents[0]}:${timeComponents[1]}:00`;
+                        } else {
+                            return null;
+                        }
+                        const result = new Date(`${datePart}T${timeStr}`);
+                        console.log(`[ExportCSV] Parsed timestamp: "${timestamp}" -> "${datePart}T${timeStr}" -> ${result}`);
+                        return result;
+                    }
+                } catch (e) {
+                    console.warn('[ExportCSV] Failed to parse timestamp:', timestamp, e);
+                }
+                return null;
+            };
+            
+            // Try event.startTime first
+            console.log('[ExportCSV] event.startTime:', this.currentEvent.startTime);
+            if (this.currentEvent.startTime) {
+                eventStartDate = parseTimestampStr(this.currentEvent.startTime);
+            }
+            
+            // Fallback: try to get timestamp from first segment
+            if (!eventStartDate || isNaN(eventStartDate.getTime())) {
+                const firstSegment = this.currentEvent.segments[0];
+                if (firstSegment?.timestamp) {
+                    eventStartDate = parseTimestampStr(firstSegment.timestamp);
+                } else if (firstSegment?.files?.front) {
+                    // Try to extract from filename (e.g., "2024-01-14_21-13-36-front.mp4")
+                    const frontFile = firstSegment.files.front;
+                    const filename = frontFile.name || frontFile.path?.split(/[/\\]/).pop() || '';
+                    const match = filename.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
+                    if (match) {
+                        eventStartDate = parseTimestampStr(match[1]);
+                    }
+                }
+            }
+            
+            console.log('[ExportCSV] Event start date:', eventStartDate);
+            
+            // Load metadata from all segments
+            for (let i = 0; i < this.currentEvent.segments.length; i++) {
+                const segment = this.currentEvent.segments[i];
+                const file = segment.files?.front;
+                const segmentStartTime = accumulatedTime;
+                
+                // Get segment-specific timestamp - prioritize filename (has full timestamp with seconds)
+                let segmentBaseDate = null;
+                
+                // First try to extract from filename (most accurate, includes seconds)
+                if (file) {
+                    const filename = file.name || file.path?.split(/[/\\]/).pop() || '';
+                    const match = filename.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
+                    if (match) {
+                        segmentBaseDate = parseTimestampStr(match[1]);
+                        console.log(`[ExportCSV] Segment ${i} timestamp from filename: ${match[1]}`);
+                    }
+                }
+                
+                // Fallback to segment.timestamp if filename parsing failed
+                if (!segmentBaseDate && segment.timestamp) {
+                    segmentBaseDate = parseTimestampStr(segment.timestamp);
+                }
+                
+                // Final fallback to event start date
+                if (!segmentBaseDate) {
+                    segmentBaseDate = eventStartDate;
+                }
+                
+                if (file) {
+                    try {
+                        let buffer;
+                        if (file instanceof File) {
+                            buffer = await file.arrayBuffer();
+                        } else if (file instanceof TauriFile) {
+                            buffer = await file.arrayBuffer();
+                        } else if (file && file.path) {
+                            const response = await fetch(getFileUrl(file));
+                            buffer = await response.arrayBuffer();
+                        }
+                        
+                        if (buffer) {
+                            const parser = new DashcamMP4(buffer);
+                            const rawMetadata = parser.parseMetadata();
+                            
+                            if (this.metadataManager && this.metadataManager.SeiMetadata) {
+                                for (const item of rawMetadata) {
+                                    try {
+                                        const decoded = this.metadataManager.SeiMetadata.decode(item.data);
+                                        const data = this.metadataManager.SeiMetadata.toObject(decoded, { enums: String, longs: String });
+                                        const eventTime = segmentStartTime + item.time;
+                                        
+                                        // Calculate actual timestamp using segment-specific base date
+                                        let timestamp = '';
+                                        if (segmentBaseDate && !isNaN(segmentBaseDate.getTime())) {
+                                            // Use item.time (time within segment) + segment base date
+                                            const recordTime = new Date(segmentBaseDate.getTime() + item.time * 1000);
+                                            timestamp = this.formatDateTimeForCSV(recordTime);
+                                        }
+                                        
+                                        allMetadata.push({
+                                            timestamp,
+                                            segmentIndex: i,
+                                            segmentTime: item.time,
+                                            eventTime,
+                                            ...data
+                                        });
+                                    } catch {
+                                        // Skip invalid items
+                                    }
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.warn(`[ExportCSV] Failed to load metadata for segment ${i}:`, err);
+                    }
+                }
+                
+                accumulatedTime += segmentDurations[i] || 60;
+            }
+            
+            if (allMetadata.length === 0) {
+                alert(translations.exportMetadataNoData);
+                return;
+            }
+            
+            // Define CSV columns (timestamp first)
+            const columns = [
+                'timestamp',
+                'segmentIndex',
+                'segmentTime',
+                'eventTime',
+                'vehicleSpeedMps',
+                'speedKmh',
+                'gearState',
+                'steeringWheelAngle',
+                'acceleratorPedalPosition',
+                'brakeApplied',
+                'blinkerOnLeft',
+                'blinkerOnRight',
+                'autopilotState',
+                'latitudeDeg',
+                'longitudeDeg',
+                'headingDeg',
+                'linearAccelerationMps2X',
+                'linearAccelerationMps2Y',
+                'linearAccelerationMps2Z'
+            ];
+            
+            // Build CSV content
+            const csvLines = [];
+            // Always include timestamp in header
+            csvLines.push(columns.join(','));
+            
+            console.log(`[ExportCSV] Building CSV with ${allMetadata.length} records, first item timestamp: "${allMetadata[0]?.timestamp || 'empty'}"`);
+            
+            for (const item of allMetadata) {
+                const speedKmh = ((item.vehicleSpeedMps || 0) * 3.6).toFixed(2);
+                const row = columns.map(col => {
+                    if (col === 'speedKmh') return speedKmh;
+                    if (col === 'timestamp') return item.timestamp || '';
+                    const val = item[col];
+                    if (val === undefined || val === null) return '';
+                    if (typeof val === 'number') return val.toFixed(6);
+                    if (typeof val === 'boolean') return val ? 'true' : 'false';
+                    // Escape strings with commas or quotes
+                    const str = String(val);
+                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                        return `"${str.replace(/"/g, '""')}"`;
+                    }
+                    return str;
+                });
+                csvLines.push(row.join(','));
+            }
+            
+            const csvContent = csvLines.join('\n');
+            
+            // Generate filename with event timestamp
+            const eventTime = this.currentEvent.startTime || new Date().toISOString();
+            const safeTimestamp = eventTime.replace(/[:\s]/g, '-').replace(/\//g, '-');
+            const filename = `tesla_metadata_${safeTimestamp}.csv`;
+            
+            // Try to use File System Access API for save dialog
+            if ('showSaveFilePicker' in window) {
+                try {
+                    const fileHandle = await window.showSaveFilePicker({
+                        suggestedName: filename,
+                        types: [{
+                            description: 'CSV File',
+                            accept: { 'text/csv': ['.csv'] }
+                        }]
+                    });
+                    
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(csvContent);
+                    await writable.close();
+                    
+                    console.log(`[ExportCSV] Exported ${allMetadata.length} metadata records`);
+                    return;
+                } catch (err) {
+                    // User cancelled or API not supported, fall back to download
+                    if (err.name === 'AbortError') {
+                        console.log('[ExportCSV] User cancelled save dialog');
+                        return;
+                    }
+                    console.warn('[ExportCSV] File System Access API failed, falling back to download:', err);
+                }
+            }
+            
+            // Fallback: download the file directly
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            console.log(`[ExportCSV] Exported ${allMetadata.length} metadata records to ${filename}`);
+        } catch (err) {
+            console.error('[ExportCSV] Error exporting metadata:', err);
+            alert(translations.exportFailed + err.message);
+        }
+    }
+    
+    /**
+     * Format date time for CSV export (YYYY-MM-DD HH:mm:ss)
+     */
+    formatDateTimeForCSV(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    }
 
     switchCamera(viewId) {
         if (!this.currentEvent) return;
@@ -8427,6 +8714,7 @@ class TeslaCamViewer {
         this.dom.googleMapBtn.textContent = translations.googleMap;
         this.dom.revealFileBtn.title = translations.revealFile;
         this.dom.downloadFileBtn.title = translations.downloadFile;
+        this.dom.exportMetadataBtn.title = translations.exportMetadata;
         if (this.dom.headerMenuBtn) {
             this.dom.headerMenuBtn.title = translations.moreOptions;
         }
@@ -8457,7 +8745,7 @@ class TeslaCamViewer {
         const metadataKeys = [
             'metadata', 'loadingMetadata', 'noMetadata', 'speed', 'gear', 'steering', 
             'accelerator', 'brake', 'blinker', 'autopilot', 'gps', 'heading', 'acceleration',
-            'revealFile', 'downloadFile', 'toggleTheme', 'toggleLanguage'
+            'revealFile', 'downloadFile', 'toggleTheme', 'toggleLanguage', 'exportMetadata'
         ];
         metadataKeys.forEach(key => {
             document.querySelectorAll(`[data-i18n="${key}"]`).forEach(el => {
