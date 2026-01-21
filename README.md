@@ -44,6 +44,8 @@ Compared to the original Tesla Dashcam player, this project provides more powerf
 | **Map Integration**: Street names & deep links to maps | ![Map Integration](.github/assets/GIF/map.webp) |
 | **Playback Speed**: Flexible 0.5x - 2.0x speed control | ![Playback Speed](.github/assets/GIF/speed.gif) |
 | **Driving Data**: Real-time display of speed, turn signals, accelerator depth, brake pedal, AP/FSD, steering angle, etc. | ![Driving Data](.github/assets/GIF/meta-data.webp) |
+| **Speed Curve**: Real-time speed curve on progress bar for quick acceleration/braking identification | ![Speed Curve](.github/assets/GIF/speed-curve.webp) |
+| **Data Export**: One-click export of driving metadata to CSV for data analysis | ![Data Export](.github/assets/GIF/csv-export.webp) |
 | **Sync Playback**: Perfectly synced footage with multiple layouts | ![Sync Playback](.github/assets/GIF/play.webp) |
 | **Visual Clipping**: Drag-and-drop handles for precise export | ![Visual Clipping](.github/assets/GIF/export.webp) |
 | **Export Results**: Grid videos with driving data watermarks | ![Export Results](.github/assets/GIF/6-exported-play.webp) |
@@ -55,6 +57,8 @@ Compared to the original Tesla Dashcam player, this project provides more powerf
 *   **Multi-Layout Sync**: Perfectly synchronized footage with multiple viewing modes: 6-grid full view, new 4-grid, old 4-grid, and single-camera full screen.
 *   **B-Pillar Support**: Full coverage including Tesla's interior B-pillar cameras.
 *   **Real-Time Dashboard**: Automatically parses SEI metadata to display speed, gear, steering angle, pedal status, Autopilot (AP/FSD) state, and GPS coordinates.
+*   **Progress Bar Speed Curve**: Renders a real-time speed curve in the progress bar background, allowing you to quickly locate key moments like rapid acceleration or emergency braking.
+*   **Driving Data Export**: One-click export of the complete driving metadata for the current event to a CSV file for further data analysis.
 *   **Smart Filtering**: Easily filter recordings by date, time, and event type (Recent, Saved, Sentry).
 *   **Map Integration**: View real-time street names and click to open the exact location on Google Maps or Gaode Maps.
 *   **Interactive Controls**: Picture-in-Picture switching, 0.5x - 2.0x playback speed, instant clip download, and keyboard shortcuts (`Space` for play/pause).

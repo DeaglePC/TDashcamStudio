@@ -92,7 +92,20 @@
         autopilotSelfDriving: "FSD",
         autopilotAutosteer: "Autosteer",
         autopilotTACC: "TACC",
-        moreOptions: "More Options"
+        moreOptions: "More Options",
+        metadataDetail: "Details",
+        vehicleStatus: "Vehicle Status",
+        drivingAssist: "Driving Assist",
+        locationInfo: "Location Info",
+        motionData: "Motion Data",
+        latitude: "Latitude",
+        longitude: "Longitude",
+        accelX: "Accel X",
+        accelY: "Accel Y",
+        accelZ: "Accel Z",
+        exportMetadata: "Export CSV",
+        exportMetadataSuccess: "Metadata exported successfully",
+        exportMetadataNoData: "No metadata available to export"
     },
     zh: {
         pageTitle: "TDashcam Studio",
@@ -189,7 +202,20 @@
         autopilotSelfDriving: "完全自动驾驶 (FSD)",
         autopilotAutosteer: "自动辅助转向",
         autopilotTACC: "自适应巡航",
-        moreOptions: "更多选项"
+        moreOptions: "更多选项",
+        metadataDetail: "详细数据",
+        vehicleStatus: "车辆状态",
+        drivingAssist: "驾驶辅助",
+        locationInfo: "位置信息",
+        motionData: "运动数据",
+        latitude: "纬度",
+        longitude: "经度",
+        accelX: "加速度 X",
+        accelY: "加速度 Y",
+        accelZ: "加速度 Z",
+        exportMetadata: "导出CSV",
+        exportMetadataSuccess: "元数据导出成功",
+        exportMetadataNoData: "没有可导出的元数据"
     }
 };
 
@@ -1495,10 +1521,16 @@ class MetadataManager {
         this.SeiMetadata = null;
         this.currentMetadata = []; // Array of metadata objects for the current segment
         this.isLoading = false;
+        this.detailModalOpen = false;
+        this.lastDetailData = null;
         
         this.dom = {
             panel: document.getElementById('metadataPanel'),
             switchBtn: document.getElementById('metaSwitchBtn'),
+            detailBtn: document.getElementById('metaDetailBtn'),
+            statsOverlay: document.getElementById('metaDetailOverlay'),
+            closeStatsBtn: document.getElementById('closeStatsBtn'),
+            statsTitle: document.getElementById('statsTitle'),
             loading: document.getElementById('metadataLoading'),
             empty: document.getElementById('metadataEmpty'),
             items: document.getElementById('metadataItems'),
@@ -1519,6 +1551,18 @@ class MetadataManager {
                 gps: document.getElementById('metaGPS'),
                 heading: document.getElementById('metaHeading'),
                 acceleration: document.getElementById('metaAcceleration')
+            },
+            stats: {
+                speed: document.getElementById('statsSpeed'),
+                gear: document.getElementById('statsGear'),
+                steering: document.getElementById('statsSteering'),
+                accelerator: document.getElementById('statsAccelerator'),
+                brake: document.getElementById('statsBrake'),
+                blinker: document.getElementById('statsBlinker'),
+                autopilot: document.getElementById('statsAutopilot'),
+                gps: document.getElementById('statsGPS'),
+                heading: document.getElementById('statsHeading'),
+                accel: document.getElementById('statsAccel')
             }
         };
         
@@ -1549,6 +1593,23 @@ class MetadataManager {
                 this.setCollapsed(!isCollapsed);
             });
         }
+
+        // Stats overlay button click (toggle)
+        if (this.dom.detailBtn) {
+            this.dom.detailBtn.addEventListener('click', () => {
+                this.toggleStatsOverlay();
+            });
+        }
+
+        // Close stats overlay
+        if (this.dom.closeStatsBtn) {
+            this.dom.closeStatsBtn.addEventListener('click', () => {
+                this.hideStatsOverlay();
+            });
+        }
+
+        // Stats overlay draggable logic
+        this.initStatsOverlayDrag();
 
         // Draggable logic
         let isDragging = false;
@@ -1806,10 +1867,215 @@ class MetadataManager {
                                      typeof d.linearAccelerationMps2Z === 'number') 
             ? `X:${d.linearAccelerationMps2X.toFixed(2)} Y:${d.linearAccelerationMps2Y.toFixed(2)} Z:${d.linearAccelerationMps2Z.toFixed(2)}` 
             : '--';
+
+        // Store for detail modal
+        this.lastDetailData = d;
+        
+        // Update stats overlay if open
+        if (this.detailModalOpen) {
+            this.updateStatsDisplay(d);
+        }
+    }
+    
+    toggleStatsOverlay() {
+        if (this.detailModalOpen) {
+            this.hideStatsOverlay();
+        } else {
+            this.showStatsOverlay();
+        }
+    }
+    
+    showStatsOverlay() {
+        if (!this.dom.statsOverlay) return;
+        this.dom.statsOverlay.classList.add('show');
+        this.detailModalOpen = true;
+        
+        // Update title based on language
+        const lang = this.viewer.currentLanguage;
+        if (this.dom.statsTitle) {
+            this.dom.statsTitle.textContent = lang === 'zh' ? '行车数据' : 'Drive Stats';
+        }
+        
+        // Update with latest data
+        if (this.lastDetailData) {
+            this.updateStatsDisplay(this.lastDetailData);
+        }
+    }
+    
+    hideStatsOverlay() {
+        if (!this.dom.statsOverlay) return;
+        this.dom.statsOverlay.classList.remove('show');
+        this.detailModalOpen = false;
+    }
+    
+    initStatsOverlayDrag() {
+        if (!this.dom.statsOverlay) return;
+        
+        let isDragging = false;
+        let offsetX, offsetY;
+        
+        const onMouseDown = (e) => {
+            if (e.button !== 0) return;
+            
+            isDragging = true;
+            this.dom.statsOverlay.classList.add('dragging');
+            
+            const rect = this.dom.statsOverlay.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+            
+            e.preventDefault();
+        };
+        
+        const onMouseMove = (e) => {
+            if (!isDragging) return;
+            
+            let newLeft = e.clientX - offsetX;
+            let newTop = e.clientY - offsetY;
+            
+            // Boundary checks
+            const panelRect = this.dom.statsOverlay.getBoundingClientRect();
+            newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - panelRect.width));
+            newTop = Math.max(0, Math.min(newTop, window.innerHeight - panelRect.height));
+            
+            this.dom.statsOverlay.style.left = `${newLeft}px`;
+            this.dom.statsOverlay.style.top = `${newTop}px`;
+        };
+        
+        const onMouseUp = () => {
+            isDragging = false;
+            this.dom.statsOverlay.classList.remove('dragging');
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        };
+        
+        // Touch support for mobile
+        const onTouchStart = (e) => {
+            if (e.touches.length !== 1) return;
+            
+            isDragging = true;
+            this.dom.statsOverlay.classList.add('dragging');
+            
+            const touch = e.touches[0];
+            const rect = this.dom.statsOverlay.getBoundingClientRect();
+            offsetX = touch.clientX - rect.left;
+            offsetY = touch.clientY - rect.top;
+            
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('touchend', onTouchEnd);
+        };
+        
+        const onTouchMove = (e) => {
+            if (!isDragging || e.touches.length !== 1) return;
+            e.preventDefault();
+            
+            const touch = e.touches[0];
+            let newLeft = touch.clientX - offsetX;
+            let newTop = touch.clientY - offsetY;
+            
+            const panelRect = this.dom.statsOverlay.getBoundingClientRect();
+            newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - panelRect.width));
+            newTop = Math.max(0, Math.min(newTop, window.innerHeight - panelRect.height));
+            
+            this.dom.statsOverlay.style.left = `${newLeft}px`;
+            this.dom.statsOverlay.style.top = `${newTop}px`;
+        };
+        
+        const onTouchEnd = () => {
+            isDragging = false;
+            this.dom.statsOverlay.classList.remove('dragging');
+            document.removeEventListener('touchmove', onTouchMove);
+            document.removeEventListener('touchend', onTouchEnd);
+        };
+        
+        this.dom.statsOverlay.addEventListener('mousedown', onMouseDown);
+        this.dom.statsOverlay.addEventListener('touchstart', onTouchStart, { passive: true });
+    }
+    
+    updateStatsDisplay(d) {
+        const lang = this.viewer.currentLanguage;
+        const s = this.dom.stats;
+        if (!s.speed) return;
+        
+        // Speed
+        const speedKmh = (d.vehicleSpeedMps || 0) * 3.6;
+        s.speed.textContent = `${speedKmh.toFixed(1)} km/h`;
+        
+        // Gear
+        const gearMap = {
+            'GEAR_PARK': 'P',
+            'GEAR_DRIVE': 'D',
+            'GEAR_REVERSE': 'R',
+            'GEAR_NEUTRAL': 'N'
+        };
+        s.gear.textContent = gearMap[d.gearState] || '--';
+        
+        // Steering
+        const steeringAngle = d.steeringWheelAngle || 0;
+        s.steering.textContent = `${steeringAngle.toFixed(1)}°`;
+        
+        // Accelerator
+        const accelPercent = d.acceleratorPedalPosition || 0;
+        s.accelerator.textContent = `${accelPercent.toFixed(1)}%`;
+        
+        // Brake
+        s.brake.textContent = d.brakeApplied 
+            ? (lang === 'zh' ? '踩下' : 'Applied') 
+            : (lang === 'zh' ? '未踩' : 'Released');
+        s.brake.className = 'stats-value' + (d.brakeApplied ? ' highlight-red' : '');
+        
+        // Blinker
+        const blinkerLeft = d.blinkerOnLeft || false;
+        const blinkerRight = d.blinkerOnRight || false;
+        if (blinkerLeft && blinkerRight) {
+            s.blinker.textContent = lang === 'zh' ? '双闪' : 'Hazard';
+            s.blinker.className = 'stats-value highlight-yellow';
+        } else if (blinkerLeft) {
+            s.blinker.textContent = lang === 'zh' ? '← 左转' : '← Left';
+            s.blinker.className = 'stats-value highlight-green';
+        } else if (blinkerRight) {
+            s.blinker.textContent = lang === 'zh' ? '右转 →' : 'Right →';
+            s.blinker.className = 'stats-value highlight-green';
+        } else {
+            s.blinker.textContent = lang === 'zh' ? '关' : 'Off';
+            s.blinker.className = 'stats-value';
+        }
+        
+        // Autopilot
+        const apMap = {
+            'NONE': lang === 'zh' ? '无' : 'None',
+            'SELF_DRIVING': 'FSD',
+            'AUTOSTEER': lang === 'zh' ? '自动转向' : 'Autosteer',
+            'TACC': 'TACC'
+        };
+        s.autopilot.textContent = apMap[d.autopilotState] || d.autopilotState || '--';
+        s.autopilot.className = 'stats-value' + (d.autopilotState && d.autopilotState !== 'NONE' ? ' highlight-blue' : '');
+        
+        // GPS
+        if (typeof d.latitudeDeg === 'number' && typeof d.longitudeDeg === 'number') {
+            s.gps.textContent = `${d.latitudeDeg.toFixed(6)}, ${d.longitudeDeg.toFixed(6)}`;
+        } else {
+            s.gps.textContent = '--';
+        }
+        
+        // Heading
+        s.heading.textContent = typeof d.headingDeg === 'number' ? `${d.headingDeg.toFixed(1)}°` : '--';
+        
+        // Acceleration (combined)
+        if (typeof d.linearAccelerationMps2X === 'number') {
+            s.accel.textContent = `X:${d.linearAccelerationMps2X.toFixed(2)} Y:${d.linearAccelerationMps2Y.toFixed(2)} Z:${d.linearAccelerationMps2Z.toFixed(2)}`;
+        } else {
+            s.accel.textContent = '--';
+        }
     }
     
     clear() {
         this.currentMetadata = [];
+        this.lastDetailData = null;
+        this.hideStatsOverlay();
         this.updateUIStatus();
     }
 }
@@ -2531,6 +2797,10 @@ class ModernVideoControls {
         this.speedBtn = this.container.querySelector('#speedBtn');
         this.speedOptions = this.container.querySelector('.speed-options');
         
+        // Speed graph elements
+        this.speedGraphContainer = this.container.querySelector('#speedGraphContainer');
+        this.speedGraphCanvas = this.container.querySelector('#speedGraphCanvas');
+        
         // Clip elements
         this.clipBtn = this.container.querySelector('#clipBtn');
         this.confirmClipBtn = this.container.querySelector('#confirmClipBtn');
@@ -2648,6 +2918,17 @@ class ModernVideoControls {
             if (this.speedControl && this.speedControl.classList.contains('active') && !this.speedControl.contains(e.target)) {
                 this.speedControl.classList.remove('active');
             }
+        });
+        
+        // Handle resize for speed graph redraw
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                if (this.lastSpeedGraphData) {
+                    this.drawSpeedGraph(this.lastSpeedGraphData.metadata, this.lastSpeedGraphData.durations);
+                }
+            }, 100);
         });
     }
     
@@ -2947,6 +3228,18 @@ class ModernVideoControls {
             metadataBtn.disabled = !this.viewer.currentEvent;
         }
         
+        // Enable/disable metadata detail button
+        const metadataDetailBtn = document.getElementById('metaDetailBtn');
+        if (metadataDetailBtn) {
+            metadataDetailBtn.disabled = !this.viewer.currentEvent;
+        }
+        
+        // Enable/disable export metadata button
+        const exportMetadataBtn = document.getElementById('exportMetadataBtn');
+        if (exportMetadataBtn) {
+            exportMetadataBtn.disabled = !this.viewer.currentEvent;
+        }
+        
         // Enable/disable clip button
         if (this.clipBtn) {
             this.clipBtn.disabled = !this.viewer.currentEvent;
@@ -3049,6 +3342,126 @@ class ModernVideoControls {
         } catch (e) {
             console.error("Error creating event marker:", e);
         }
+    }
+    
+    /**
+     * Draw speed graph based on metadata for the entire event
+     * @param {Array} allSegmentsMetadata - Array of metadata arrays for each segment
+     * @param {Array} segmentDurations - Duration of each segment
+     */
+    drawSpeedGraph(allSegmentsMetadata, segmentDurations) {
+        if (!this.speedGraphCanvas || !this.speedGraphContainer) return;
+        
+        // Store data for resize redraw
+        this.lastSpeedGraphData = { metadata: allSegmentsMetadata, durations: segmentDurations };
+        
+        if (!allSegmentsMetadata || allSegmentsMetadata.length === 0) {
+            this.speedGraphContainer.classList.remove('visible');
+            return;
+        }
+        
+        const canvas = this.speedGraphCanvas;
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size for high DPI
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        
+        const width = rect.width;
+        const height = rect.height;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, width, height);
+        
+        // Collect all speed data with normalized time
+        const speedData = [];
+        let totalDuration = 0;
+        
+        for (let i = 0; i < allSegmentsMetadata.length; i++) {
+            const segmentMeta = allSegmentsMetadata[i];
+            const segmentDuration = segmentDurations[i] || 60;
+            const segmentStartTime = totalDuration;
+            
+            if (segmentMeta && segmentMeta.length > 0) {
+                for (const item of segmentMeta) {
+                    const speedKmh = (item.data?.vehicleSpeedMps || 0) * 3.6;
+                    const timeInEvent = segmentStartTime + (item.time || 0);
+                    speedData.push({ time: timeInEvent, speed: speedKmh });
+                }
+            }
+            totalDuration += segmentDuration;
+        }
+        
+        if (speedData.length < 2 || totalDuration === 0) {
+            this.speedGraphContainer.classList.remove('visible');
+            return;
+        }
+        
+        // Sort by time
+        speedData.sort((a, b) => a.time - b.time);
+        
+        // Find max speed for scaling
+        const maxSpeed = Math.max(...speedData.map(d => d.speed), 1);
+        const padding = { top: 2, bottom: 4 };
+        const graphHeight = height - padding.top - padding.bottom;
+        
+        // Create gradient fill
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, 'rgba(66, 165, 245, 0.5)');
+        gradient.addColorStop(1, 'rgba(66, 165, 245, 0.05)');
+        
+        // Draw filled area
+        ctx.beginPath();
+        ctx.moveTo(0, height);
+        
+        for (let i = 0; i < speedData.length; i++) {
+            const x = (speedData[i].time / totalDuration) * width;
+            const y = height - padding.bottom - (speedData[i].speed / maxSpeed) * graphHeight;
+            
+            if (i === 0) {
+                ctx.lineTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        // Close the path
+        const lastX = (speedData[speedData.length - 1].time / totalDuration) * width;
+        ctx.lineTo(lastX, height);
+        ctx.closePath();
+        
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        
+        // Draw the line on top
+        ctx.beginPath();
+        for (let i = 0; i < speedData.length; i++) {
+            const x = (speedData[i].time / totalDuration) * width;
+            const y = height - padding.bottom - (speedData[i].speed / maxSpeed) * graphHeight;
+            
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        
+        ctx.strokeStyle = 'rgba(66, 165, 245, 0.8)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        
+        this.speedGraphContainer.classList.add('visible');
+    }
+    
+    clearSpeedGraph() {
+        if (!this.speedGraphCanvas || !this.speedGraphContainer) return;
+        const ctx = this.speedGraphCanvas.getContext('2d');
+        ctx.clearRect(0, 0, this.speedGraphCanvas.width, this.speedGraphCanvas.height);
+        this.speedGraphContainer.classList.remove('visible');
+        this.lastSpeedGraphData = null;
     }
 }
 
@@ -6782,10 +7195,14 @@ class TeslaCamViewer {
             closeModalBtn: document.getElementById('closeModalBtn'),
             revealFileBtn: document.getElementById('revealFileBtn'),
             downloadFileBtn: document.getElementById('downloadFileBtn'),
+            exportMetadataBtn: document.getElementById('exportMetadataBtn'),
             metadataSwitchBtn: document.getElementById('metaSwitchBtn'),
             headerLocationDisplay: document.getElementById('headerLocationDisplay'),
             headerMenuBtn: document.getElementById('headerMenuBtn'),
             headerRight: document.getElementById('headerRight'),
+            headerActionsGroup: document.getElementById('headerActionsGroup'),
+            headerCenterInfo: document.getElementById('headerCenterInfo') || document.querySelector('.header-center-info'),
+            mainHeader: document.querySelector('.main-header'),
             // Clip modal elements
             clipModal: document.getElementById('clipModal'),
             clipModalTitle: document.getElementById('clipModalTitle'),
@@ -6992,6 +7409,7 @@ class TeslaCamViewer {
         this.dom.googleMapBtn.addEventListener('click', () => this.openMap('google'));
         this.dom.revealFileBtn.addEventListener('click', () => this.revealCurrentFilePath());
         this.dom.downloadFileBtn.addEventListener('click', () => this.downloadCurrentFile());
+        this.dom.exportMetadataBtn.addEventListener('click', () => this.exportMetadataToCSV());
         
         // Clip modal listeners
         this.dom.closeClipModalBtn.addEventListener('click', () => this.hideClipModal());
@@ -7010,6 +7428,11 @@ class TeslaCamViewer {
             if (e.target === this.dom.filePathModal) {
                 this.hideFilePathModal();
             }
+        });
+
+        // Initial check for header collapse after DOM is ready
+        requestAnimationFrame(() => {
+            this.checkHeaderCollapse();
         });
     }
 
@@ -7094,6 +7517,7 @@ class TeslaCamViewer {
         const activeElement = document.activeElement;
         const isTyping = activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA' || activeElement.isContentEditable);
 
+
         if (e.key === ' ' && !isTyping) {
             e.preventDefault();
             this.videoControls.togglePlayPause();
@@ -7109,6 +7533,58 @@ class TeslaCamViewer {
         setTimeout(() => {
             this.dom.sidebar.style.transition = '';
         }, 50);
+
+        // Check if header buttons need to collapse
+        this.checkHeaderCollapse();
+    }
+
+    checkHeaderCollapse() {
+        const mainHeader = this.dom.mainHeader;
+        const centerInfo = this.dom.headerCenterInfo;
+        const actionsGroup = this.dom.headerActionsGroup;
+        const headerRight = this.dom.headerRight;
+        
+        if (!mainHeader || !centerInfo || !actionsGroup) return;
+
+        // Store current state
+        const wasCollapsed = mainHeader.classList.contains('header-collapsed');
+        
+        // Close dropdown menu during resize to prevent visual glitches
+        if (headerRight) {
+            headerRight.classList.remove('active');
+        }
+        
+        // Disable transitions and hide actionsGroup during measurement
+        mainHeader.style.transition = 'none';
+        actionsGroup.style.transition = 'none';
+        actionsGroup.style.visibility = 'hidden';
+        actionsGroup.style.opacity = '0';
+        
+        // Temporarily force non-collapsed state to measure true button width
+        mainHeader.classList.remove('header-collapsed');
+        
+        // Force a reflow to get accurate measurements
+        void mainHeader.offsetWidth;
+        
+        // Get bounding rects
+        const centerRect = centerInfo.getBoundingClientRect();
+        const actionsRect = actionsGroup.getBoundingClientRect();
+        
+        // Check if there's overlap (with some padding for safety)
+        const padding = 16;
+        const shouldCollapse = actionsRect.left < (centerRect.right + padding);
+
+        if (shouldCollapse) {
+            mainHeader.classList.add('header-collapsed');
+        }
+        
+        // Restore styles after a frame
+        requestAnimationFrame(() => {
+            mainHeader.style.transition = '';
+            actionsGroup.style.transition = '';
+            actionsGroup.style.visibility = '';
+            actionsGroup.style.opacity = '';
+        });
     }
 
     async handleDrop(e) {
@@ -7471,6 +7947,9 @@ class TeslaCamViewer {
         this.videoControls.setTotalDuration(this.continuousPlayer.getTotalDuration());
         this.videoControls.addEventMarkers(event);
         
+        // Load speed graph for entire event (async, don't block playback)
+        this.loadSpeedGraphForEvent(event);
+        
         // Default to Legacy (PIP) view with Front camera
         this.multiCameraPlayer.setCamera('front');
         this.multiCameraPlayer.setLayout('legacy');
@@ -7481,6 +7960,401 @@ class TeslaCamViewer {
         document.querySelectorAll('.video-card.active').forEach(c => c.classList.remove('active'));
         document.querySelector(`.video-card[data-event-id="${eventId}"]`)?.classList.add('active');
         if (window.innerWidth < 768) this.toggleSidebar(false);
+    }
+    
+    /**
+     * Load speed data for all segments and draw the speed graph
+     */
+    async loadSpeedGraphForEvent(event) {
+        if (!event || !event.segments || event.segments.length === 0) {
+            this.videoControls.clearSpeedGraph();
+            return;
+        }
+        
+        try {
+            const allSegmentsMetadata = [];
+            const segmentDurations = event.segmentDurations || [];
+            
+            for (let i = 0; i < event.segments.length; i++) {
+                const segment = event.segments[i];
+                const file = segment.files?.front;
+                
+                if (!file) {
+                    allSegmentsMetadata.push([]);
+                    continue;
+                }
+                
+                try {
+                    let buffer;
+                    if (file instanceof File) {
+                        buffer = await file.arrayBuffer();
+                    } else if (file instanceof TauriFile) {
+                        buffer = await file.arrayBuffer();
+                    } else if (file && file.path) {
+                        const response = await fetch(getFileUrl(file));
+                        buffer = await response.arrayBuffer();
+                    } else {
+                        allSegmentsMetadata.push([]);
+                        continue;
+                    }
+                    
+                    const parser = new DashcamMP4(buffer);
+                    const rawMetadata = parser.parseMetadata();
+                    
+                    if (this.metadataManager && this.metadataManager.SeiMetadata) {
+                        const segmentMeta = rawMetadata.map(item => {
+                            try {
+                                const decoded = this.metadataManager.SeiMetadata.decode(item.data);
+                                return {
+                                    time: item.time,
+                                    data: this.metadataManager.SeiMetadata.toObject(decoded, { enums: String, longs: String })
+                                };
+                            } catch {
+                                return null;
+                            }
+                        }).filter(Boolean);
+                        allSegmentsMetadata.push(segmentMeta);
+                    } else {
+                        allSegmentsMetadata.push([]);
+                    }
+                } catch (err) {
+                    console.warn(`[SpeedGraph] Failed to load metadata for segment ${i}:`, err);
+                    allSegmentsMetadata.push([]);
+                }
+            }
+            
+            this.videoControls.drawSpeedGraph(allSegmentsMetadata, segmentDurations);
+        } catch (err) {
+            console.error('[SpeedGraph] Error loading speed graph:', err);
+            this.videoControls.clearSpeedGraph();
+        }
+    }
+    
+    /**
+     * Export all metadata from the current event to a CSV file
+     */
+    async exportMetadataToCSV() {
+        const lang = this.currentLanguage;
+        const translations = i18n[lang];
+        
+        if (!this.currentEvent || !this.currentEvent.segments) {
+            alert(translations.exportMetadataNoData);
+            return;
+        }
+        
+        try {
+            const allMetadata = [];
+            const segmentDurations = this.currentEvent.segmentDurations || [];
+            let accumulatedTime = 0;
+            
+            // Parse event start time for timestamp calculation
+            let eventStartDate = null;
+            
+            // Helper function to parse timestamp
+            const parseTimestampStr = (timestamp) => {
+                if (!timestamp) return null;
+                try {
+                    // Parse "2024-01-01_12-00-00" or "2024-01-01_12-00" format
+                    const [datePart, timePart] = timestamp.split('_');
+                    if (datePart && timePart) {
+                        // Handle both HH-MM-SS and HH-MM formats
+                        const timeComponents = timePart.split('-');
+                        let timeStr;
+                        if (timeComponents.length >= 3) {
+                            // Has seconds: HH-MM-SS
+                            timeStr = `${timeComponents[0]}:${timeComponents[1]}:${timeComponents[2]}`;
+                        } else if (timeComponents.length === 2) {
+                            // No seconds: HH-MM, add :00
+                            timeStr = `${timeComponents[0]}:${timeComponents[1]}:00`;
+                        } else {
+                            return null;
+                        }
+                        const result = new Date(`${datePart}T${timeStr}`);
+                        console.log(`[ExportCSV] Parsed timestamp: "${timestamp}" -> "${datePart}T${timeStr}" -> ${result}`);
+                        return result;
+                    }
+                } catch (e) {
+                    console.warn('[ExportCSV] Failed to parse timestamp:', timestamp, e);
+                }
+                return null;
+            };
+            
+            // Try event.startTime first
+            console.log('[ExportCSV] event.startTime:', this.currentEvent.startTime);
+            if (this.currentEvent.startTime) {
+                eventStartDate = parseTimestampStr(this.currentEvent.startTime);
+            }
+            
+            // Fallback: try to get timestamp from first segment
+            if (!eventStartDate || isNaN(eventStartDate.getTime())) {
+                const firstSegment = this.currentEvent.segments[0];
+                if (firstSegment?.timestamp) {
+                    eventStartDate = parseTimestampStr(firstSegment.timestamp);
+                } else if (firstSegment?.files?.front) {
+                    // Try to extract from filename (e.g., "2024-01-14_21-13-36-front.mp4")
+                    const frontFile = firstSegment.files.front;
+                    const filename = frontFile.name || frontFile.path?.split(/[/\\]/).pop() || '';
+                    const match = filename.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
+                    if (match) {
+                        eventStartDate = parseTimestampStr(match[1]);
+                    }
+                }
+            }
+            
+            console.log('[ExportCSV] Event start date:', eventStartDate);
+            
+            // Load metadata from all segments
+            for (let i = 0; i < this.currentEvent.segments.length; i++) {
+                const segment = this.currentEvent.segments[i];
+                const file = segment.files?.front;
+                const segmentStartTime = accumulatedTime;
+                
+                // Get segment-specific timestamp - prioritize filename (has full timestamp with seconds)
+                let segmentBaseDate = null;
+                
+                // First try to extract from filename (most accurate, includes seconds)
+                if (file) {
+                    const filename = file.name || file.path?.split(/[/\\]/).pop() || '';
+                    const match = filename.match(/(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})/);
+                    if (match) {
+                        segmentBaseDate = parseTimestampStr(match[1]);
+                        console.log(`[ExportCSV] Segment ${i} timestamp from filename: ${match[1]}`);
+                    }
+                }
+                
+                // Fallback to segment.timestamp if filename parsing failed
+                if (!segmentBaseDate && segment.timestamp) {
+                    segmentBaseDate = parseTimestampStr(segment.timestamp);
+                }
+                
+                // Final fallback to event start date
+                if (!segmentBaseDate) {
+                    segmentBaseDate = eventStartDate;
+                }
+                
+                if (file) {
+                    try {
+                        let buffer;
+                        if (file instanceof File) {
+                            buffer = await file.arrayBuffer();
+                        } else if (file instanceof TauriFile) {
+                            buffer = await file.arrayBuffer();
+                        } else if (file && file.path) {
+                            const response = await fetch(getFileUrl(file));
+                            buffer = await response.arrayBuffer();
+                        }
+                        
+                        if (buffer) {
+                            const parser = new DashcamMP4(buffer);
+                            const rawMetadata = parser.parseMetadata();
+                            
+                            if (this.metadataManager && this.metadataManager.SeiMetadata) {
+                                for (const item of rawMetadata) {
+                                    try {
+                                        const decoded = this.metadataManager.SeiMetadata.decode(item.data);
+                                        const data = this.metadataManager.SeiMetadata.toObject(decoded, { enums: String, longs: String });
+                                        const eventTime = segmentStartTime + item.time;
+                                        
+                                        // Calculate actual timestamp using segment-specific base date
+                                        let timestamp = '';
+                                        if (segmentBaseDate && !isNaN(segmentBaseDate.getTime())) {
+                                            // Use item.time (time within segment) + segment base date
+                                            const recordTime = new Date(segmentBaseDate.getTime() + item.time * 1000);
+                                            timestamp = this.formatDateTimeForCSV(recordTime);
+                                        }
+                                        
+                                        allMetadata.push({
+                                            timestamp,
+                                            segmentIndex: i,
+                                            segmentTime: item.time,
+                                            eventTime,
+                                            ...data
+                                        });
+                                    } catch {
+                                        // Skip invalid items
+                                    }
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.warn(`[ExportCSV] Failed to load metadata for segment ${i}:`, err);
+                    }
+                }
+                
+                accumulatedTime += segmentDurations[i] || 60;
+            }
+            
+            if (allMetadata.length === 0) {
+                alert(translations.exportMetadataNoData);
+                return;
+            }
+            
+            // Define CSV columns (timestamp first)
+            const columns = [
+                'timestamp',
+                'segmentIndex',
+                'segmentTime',
+                'eventTime',
+                'vehicleSpeedMps',
+                'speedKmh',
+                'gearState',
+                'steeringWheelAngle',
+                'acceleratorPedalPosition',
+                'brakeApplied',
+                'blinkerOnLeft',
+                'blinkerOnRight',
+                'autopilotState',
+                'latitudeDeg',
+                'longitudeDeg',
+                'headingDeg',
+                'linearAccelerationMps2X',
+                'linearAccelerationMps2Y',
+                'linearAccelerationMps2Z'
+            ];
+            
+            // Build CSV content
+            const csvLines = [];
+            // Always include timestamp in header
+            csvLines.push(columns.join(','));
+            
+            console.log(`[ExportCSV] Building CSV with ${allMetadata.length} records, first item timestamp: "${allMetadata[0]?.timestamp || 'empty'}"`);
+            
+            for (const item of allMetadata) {
+                const speedKmh = ((item.vehicleSpeedMps || 0) * 3.6).toFixed(2);
+                const row = columns.map(col => {
+                    if (col === 'speedKmh') return speedKmh;
+                    if (col === 'timestamp') return item.timestamp || '';
+                    const val = item[col];
+                    if (val === undefined || val === null) return '';
+                    if (typeof val === 'number') return val.toFixed(6);
+                    if (typeof val === 'boolean') return val ? 'true' : 'false';
+                    // Escape strings with commas or quotes
+                    const str = String(val);
+                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                        return `"${str.replace(/"/g, '""')}"`;
+                    }
+                    return str;
+                });
+                csvLines.push(row.join(','));
+            }
+            
+            const csvContent = csvLines.join('\n');
+            
+            // Generate filename with event timestamp
+            const eventTime = this.currentEvent.startTime || new Date().toISOString();
+            const safeTimestamp = eventTime.replace(/[:\s]/g, '-').replace(/\//g, '-');
+            const filename = `tesla_metadata_${safeTimestamp}.csv`;
+            
+            // Tauri environment: use Tauri dialog and fs APIs
+            if (window.__TAURI__) {
+                try {
+                    const tauri = window.__TAURI__;
+                    const invoke = tauri.core?.invoke || tauri.invoke || (tauri.tauri && tauri.tauri.invoke);
+                    
+                    if (!invoke) {
+                        throw new Error('Tauri invoke not found');
+                    }
+                    
+                    // Use Tauri dialog to get save path
+                    const savePath = await invoke('plugin:dialog|save', {
+                        options: {
+                            defaultPath: filename,
+                            filters: [{
+                                name: 'CSV File',
+                                extensions: ['csv']
+                            }]
+                        }
+                    });
+                    
+                    const resolvedSavePath = typeof savePath === 'string' ? savePath : savePath?.path;
+                    if (!resolvedSavePath) {
+                        console.log('[ExportCSV] User cancelled save dialog');
+                        return;
+                    }
+                    
+                    // Write CSV content using Tauri fs
+                    const fs = tauri.fs;
+                    if (fs && fs.writeTextFile) {
+                        await fs.writeTextFile(resolvedSavePath, csvContent);
+                    } else if (fs && fs.writeFile) {
+                        const encoder = new TextEncoder();
+                        const uint8Array = encoder.encode(csvContent);
+                        await fs.writeFile(resolvedSavePath, uint8Array);
+                    } else {
+                        // Fallback to custom command
+                        const encoder = new TextEncoder();
+                        const bytes = Array.from(encoder.encode(csvContent));
+                        await invoke('write_binary_file', {
+                            path: resolvedSavePath,
+                            bytes
+                        });
+                    }
+                    
+                    console.log(`[ExportCSV] Exported ${allMetadata.length} metadata records to ${resolvedSavePath}`);
+                    this.showToast(translations.exportMetadataSuccess, 'success');
+                    return;
+                } catch (err) {
+                    console.error('[ExportCSV] Tauri save failed:', err);
+                    // Fall through to web fallback
+                }
+            }
+            
+            // Web environment: Try to use File System Access API for save dialog
+            if ('showSaveFilePicker' in window && !window.__TAURI__) {
+                try {
+                    const fileHandle = await window.showSaveFilePicker({
+                        suggestedName: filename,
+                        types: [{
+                            description: 'CSV File',
+                            accept: { 'text/csv': ['.csv'] }
+                        }]
+                    });
+                    
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(csvContent);
+                    await writable.close();
+                    
+                    console.log(`[ExportCSV] Exported ${allMetadata.length} metadata records`);
+                    return;
+                } catch (err) {
+                    // User cancelled or API not supported, fall back to download
+                    if (err.name === 'AbortError') {
+                        console.log('[ExportCSV] User cancelled save dialog');
+                        return;
+                    }
+                    console.warn('[ExportCSV] File System Access API failed, falling back to download:', err);
+                }
+            }
+            
+            // Fallback: download the file directly
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            console.log(`[ExportCSV] Exported ${allMetadata.length} metadata records to ${filename}`);
+        } catch (err) {
+            console.error('[ExportCSV] Error exporting metadata:', err);
+            alert(translations.exportFailed + err.message);
+        }
+    }
+    
+    /**
+     * Format date time for CSV export (YYYY-MM-DD HH:mm:ss)
+     */
+    formatDateTimeForCSV(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     }
 
     switchCamera(viewId) {
@@ -7953,6 +8827,7 @@ class TeslaCamViewer {
         this.dom.googleMapBtn.textContent = translations.googleMap;
         this.dom.revealFileBtn.title = translations.revealFile;
         this.dom.downloadFileBtn.title = translations.downloadFile;
+        this.dom.exportMetadataBtn.title = translations.exportMetadata;
         if (this.dom.headerMenuBtn) {
             this.dom.headerMenuBtn.title = translations.moreOptions;
         }
@@ -7983,7 +8858,7 @@ class TeslaCamViewer {
         const metadataKeys = [
             'metadata', 'loadingMetadata', 'noMetadata', 'speed', 'gear', 'steering', 
             'accelerator', 'brake', 'blinker', 'autopilot', 'gps', 'heading', 'acceleration',
-            'revealFile', 'downloadFile', 'toggleTheme', 'toggleLanguage'
+            'revealFile', 'downloadFile', 'toggleTheme', 'toggleLanguage', 'exportMetadata'
         ];
         metadataKeys.forEach(key => {
             document.querySelectorAll(`[data-i18n="${key}"]`).forEach(el => {
@@ -8014,6 +8889,9 @@ class TeslaCamViewer {
         document.body.classList.toggle('sidebar-collapsed', isNowCollapsed);
         this.dom.toggleSidebarBtn.classList.toggle('collapsed', isNowCollapsed);
         this.dom.overlay.classList.toggle('active', !isNowCollapsed && window.innerWidth < 768);
+        
+        // Re-check header collapse after sidebar animation completes
+        setTimeout(() => this.checkHeaderCollapse(), 350);
     }
 
     initSwipeGestures() {
