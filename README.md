@@ -44,6 +44,8 @@ Compared to the original Tesla Dashcam player, this project provides more powerf
 | **Map Integration**: Street names & deep links to maps | ![Map Integration](.github/assets/GIF/map.webp) |
 | **Playback Speed**: Flexible 0.5x - 2.0x speed control | ![Playback Speed](.github/assets/GIF/speed.gif) |
 | **Driving Data**: Real-time display of speed, turn signals, accelerator depth, brake pedal, AP/FSD, steering angle, etc. | ![Driving Data](.github/assets/GIF/meta-data.webp) |
+| **Speed Curve**: Real-time speed curve on progress bar for quick acceleration/braking identification | ![Speed Curve](.github/assets/GIF/speed-curve.webp) |
+| **Data Export**: One-click export of driving metadata to CSV for data analysis | ![Data Export](.github/assets/GIF/csv-export.webp) |
 | **Sync Playback**: Perfectly synced footage with multiple layouts | ![Sync Playback](.github/assets/GIF/play.webp) |
 | **Visual Clipping**: Drag-and-drop handles for precise export | ![Visual Clipping](.github/assets/GIF/export.webp) |
 | **Export Results**: Grid videos with driving data watermarks | ![Export Results](.github/assets/GIF/6-exported-play.webp) |

@@ -44,6 +44,8 @@
 | **地图集成**：显示具体街道，一键跳转高德/Google地图 | ![地图集成](.github/assets/GIF/map.webp) |
 | **倍速控制**：支持 0.5x - 2.0x 灵活变速播放 | ![倍速控制](.github/assets/GIF/speed.gif) |
 | **行车数据**：实时展示车速、转向灯、油门深度、刹车踏板、AP/FSD 及 方向盘角度等 | ![行车数据](.github/assets/GIF/meta-data.webp) |
+| **速度曲线**：进度条实时渲染速度曲线，快速定位急加速/制动时刻 | ![速度曲线](.github/assets/GIF/speed-curve.webp) |
+| **数据导出**：一键导出行车元数据为 CSV，支持数据分析 | ![数据导出](.github/assets/GIF/csv-export.webp) |
 | **多镜头同步**：所有视角完美同步，布局自由切换 | ![多镜头同步](.github/assets/GIF/play.webp) |
 | **可视化剪辑**：进度条直接拖拽，导出所见即所得 | ![可视化剪辑](.github/assets/GIF/export.webp) |
 | **导出预览**：自动合成网格视频，自带行车数据水印 | ![导出预览](.github/assets/GIF/6-exported-play.webp) |
