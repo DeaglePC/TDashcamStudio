@@ -55,6 +55,8 @@ Compared to the original Tesla Dashcam player, this project provides more powerf
 *   **Multi-Layout Sync**: Perfectly synchronized footage with multiple viewing modes: 6-grid full view, new 4-grid, old 4-grid, and single-camera full screen.
 *   **B-Pillar Support**: Full coverage including Tesla's interior B-pillar cameras.
 *   **Real-Time Dashboard**: Automatically parses SEI metadata to display speed, gear, steering angle, pedal status, Autopilot (AP/FSD) state, and GPS coordinates.
+*   **Progress Bar Speed Curve**: Renders a real-time speed curve in the progress bar background, allowing you to quickly locate key moments like rapid acceleration or emergency braking.
+*   **Driving Data Export**: One-click export of the complete driving metadata for the current event to a CSV file for further data analysis.
 *   **Smart Filtering**: Easily filter recordings by date, time, and event type (Recent, Saved, Sentry).
 *   **Map Integration**: View real-time street names and click to open the exact location on Google Maps or Gaode Maps.
 *   **Interactive Controls**: Picture-in-Picture switching, 0.5x - 2.0x playback speed, instant clip download, and keyboard shortcuts (`Space` for play/pause).

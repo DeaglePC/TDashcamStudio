@@ -8245,8 +8245,62 @@ class TeslaCamViewer {
             const safeTimestamp = eventTime.replace(/[:\s]/g, '-').replace(/\//g, '-');
             const filename = `tesla_metadata_${safeTimestamp}.csv`;
             
-            // Try to use File System Access API for save dialog
-            if ('showSaveFilePicker' in window) {
+            // Tauri environment: use Tauri dialog and fs APIs
+            if (window.__TAURI__) {
+                try {
+                    const tauri = window.__TAURI__;
+                    const invoke = tauri.core?.invoke || tauri.invoke || (tauri.tauri && tauri.tauri.invoke);
+                    
+                    if (!invoke) {
+                        throw new Error('Tauri invoke not found');
+                    }
+                    
+                    // Use Tauri dialog to get save path
+                    const savePath = await invoke('plugin:dialog|save', {
+                        options: {
+                            defaultPath: filename,
+                            filters: [{
+                                name: 'CSV File',
+                                extensions: ['csv']
+                            }]
+                        }
+                    });
+                    
+                    const resolvedSavePath = typeof savePath === 'string' ? savePath : savePath?.path;
+                    if (!resolvedSavePath) {
+                        console.log('[ExportCSV] User cancelled save dialog');
+                        return;
+                    }
+                    
+                    // Write CSV content using Tauri fs
+                    const fs = tauri.fs;
+                    if (fs && fs.writeTextFile) {
+                        await fs.writeTextFile(resolvedSavePath, csvContent);
+                    } else if (fs && fs.writeFile) {
+                        const encoder = new TextEncoder();
+                        const uint8Array = encoder.encode(csvContent);
+                        await fs.writeFile(resolvedSavePath, uint8Array);
+                    } else {
+                        // Fallback to custom command
+                        const encoder = new TextEncoder();
+                        const bytes = Array.from(encoder.encode(csvContent));
+                        await invoke('write_binary_file', {
+                            path: resolvedSavePath,
+                            bytes
+                        });
+                    }
+                    
+                    console.log(`[ExportCSV] Exported ${allMetadata.length} metadata records to ${resolvedSavePath}`);
+                    this.showToast(translations.exportMetadataSuccess, 'success');
+                    return;
+                } catch (err) {
+                    console.error('[ExportCSV] Tauri save failed:', err);
+                    // Fall through to web fallback
+                }
+            }
+            
+            // Web environment: Try to use File System Access API for save dialog
+            if ('showSaveFilePicker' in window && !window.__TAURI__) {
                 try {
                     const fileHandle = await window.showSaveFilePicker({
                         suggestedName: filename,
